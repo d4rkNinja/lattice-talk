@@ -23,9 +23,9 @@ export const MCP_SPEC_URL = "https://modelcontextprotocol.io/specification/2026-
 export const MCP_TS_SDK_PACKAGE = "@modelcontextprotocol/sdk";
 
 /**
- * SDK v1 `registerTool` / `registerResource` / `registerPrompt` default
- * `listChanged: true`. Spec: that flag means this server WILL emit
- * `notifications/*/list_changed`. Lattice never does, so we advertise false.
+ * SDK v1 registerTool / registerResource / registerPrompt default
+ * listChanged: true. Spec: that flag means this server WILL emit
+ * list_changed notifications. Lattice never does, so we advertise false.
  */
 export const STATIC_LIST_CAPABILITIES = {
   tools: { listChanged: false },

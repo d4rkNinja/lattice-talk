@@ -12,7 +12,14 @@ import {
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { Resource } from "@opentelemetry/resources";
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import {
+  BatchSpanProcessor,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+  type ReadableSpan,
+  type SpanExporter,
+  type SpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type { LatticeConfig } from "../core/config.js";
@@ -35,8 +42,60 @@ export function installOtelStderrLogger(): void {
   diag.setLogger(stderrLogger, DiagLogLevel.ERROR);
 }
 
-export function setupOtel(config: LatticeConfig): OtelHandle {
+export interface InProcessOtel extends OtelHandle {
+  enabled: true;
+  exporter: InMemorySpanExporter;
+  spans(): ReadableSpan[];
+}
+
+function registerProvider(serviceName: string, processors: SpanProcessor[]): NodeTracerProvider {
+  const provider = new NodeTracerProvider({
+    resource: new Resource({
+      [ATTR_SERVICE_NAME]: serviceName,
+    }),
+    spanProcessors: processors,
+  });
+  provider.register({
+    propagator: new W3CTraceContextPropagator(),
+  });
+  return provider;
+}
+
+/**
+ * In-process exporter for tests. Asserts spans without an OTLP collector.
+ * Call once per process; OTEL global tracer registration is sticky.
+ */
+export function setupInProcessOtel(serviceName = "lattice-talk-test"): InProcessOtel {
   installOtelStderrLogger();
+  const exporter = new InMemorySpanExporter();
+  const provider = registerProvider(serviceName, [new SimpleSpanProcessor(exporter)]);
+  return {
+    enabled: true,
+    exporter,
+    spans: () => exporter.getFinishedSpans(),
+    async shutdown() {
+      await provider.shutdown();
+    },
+  };
+}
+
+export function setupOtel(
+  config: LatticeConfig,
+  options?: { exporter?: SpanExporter },
+): OtelHandle {
+  installOtelStderrLogger();
+  if (options?.exporter) {
+    const provider = registerProvider(config.otelServiceName, [
+      new SimpleSpanProcessor(options.exporter),
+    ]);
+    return {
+      enabled: true,
+      async shutdown() {
+        await provider.shutdown();
+      },
+    };
+  }
+
   const endpoint = config.otelEndpoint;
   if (!endpoint) {
     return { enabled: false, shutdown: async () => undefined };
@@ -47,24 +106,12 @@ export function setupOtel(config: LatticeConfig): OtelHandle {
       ? endpoint
       : `${endpoint.replace(/\/$/, "")}/v1/traces`;
 
-    const resource = new Resource({
-      [ATTR_SERVICE_NAME]: config.otelServiceName,
-    });
-
     const exporter = new OTLPTraceExporter({
       url,
       headers: config.otelHeaders,
     });
 
-    const provider = new NodeTracerProvider({
-      resource,
-      spanProcessors: [new BatchSpanProcessor(exporter)],
-    });
-
-    provider.register({
-      propagator: new W3CTraceContextPropagator(),
-    });
-    propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+    const provider = registerProvider(config.otelServiceName, [new BatchSpanProcessor(exporter)]);
 
     log("otel exporter enabled", url);
     return {

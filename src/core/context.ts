@@ -1,6 +1,10 @@
 import type { AgentRecord } from "./types.js";
 
-/** Process-local memory of the last successful join. Tools may still pass ids explicitly. */
+/**
+ * Process-local identity from the last successful join_session.
+ * Mutating and private-read tools use ctx.sessionId / ctx.agentId and ignore
+ * any model-supplied agent_id.
+ */
 export class RuntimeContext {
   sessionId?: string;
   agentId?: string;

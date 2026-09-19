@@ -2,9 +2,20 @@ import { randomUUID } from "node:crypto";
 import { safeEqual, sha256Hex } from "./crypto.js";
 import { UserError } from "./errors.js";
 import { optionalId } from "./ids.js";
-import { DEFAULT_ROOM } from "./limits.js";
+import {
+  DEFAULT_ROOM,
+  PEERS_LIST_DEFAULT_LIMIT,
+  PEERS_LIST_MAX_LIMIT,
+  SESSION_ROOMS_CAP,
+} from "./limits.js";
+import { clampListLimit, pageSortedKeys } from "./page.js";
 import { refreshPresence } from "./presence.js";
-import { resolveAgentId, resolveSessionId } from "./resolve.js";
+import {
+  requireJoinedSession,
+  resolveInspectSessionId,
+  resolveProvidedOrInspectSessionId,
+  resolveSessionId,
+} from "./resolve.js";
 import { ensureMainRoom } from "./rooms.js";
 import type { AgentRecord, BusDeps, PeerInfo, SessionMeta } from "./types.js";
 
@@ -102,10 +113,9 @@ export async function joinSession(
 
 export async function leaveSession(
   deps: BusDeps,
-  input: { session_id?: string; agent_id?: string },
+  input: { session_id?: string } = {},
 ): Promise<{ left: boolean; session_id: string; agent_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
+  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
   await deps.store.clearPresence(sessionId, agentId);
   await deps.store.removeAgentFromAllRooms(sessionId, agentId);
   await deps.store.removeAgent(sessionId, agentId);
@@ -115,23 +125,32 @@ export async function leaveSession(
 
 export async function listPeers(
   deps: BusDeps,
-  input: { session_id?: string } = {},
-): Promise<{ session_id: string; peers: PeerInfo[]; peer_count: number; online_count: number }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agents = await deps.store.listAgents(sessionId);
-  const online = await deps.store.presenceStatus(
-    sessionId,
-    agents.map((a) => a.agent_id),
-  );
+  input: { session_id?: string; cursor?: string; limit?: number } = {},
+): Promise<{
+  session_id: string;
+  peers: PeerInfo[];
+  peer_count: number;
+  online_count: number;
+  next_cursor?: string;
+  truncated: boolean;
+}> {
+  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
+  const ids = await deps.store.listAgentIds(sessionId);
+  const limit = clampListLimit(input.limit, PEERS_LIST_DEFAULT_LIMIT, PEERS_LIST_MAX_LIMIT);
+  const page = pageSortedKeys(ids, input.cursor, limit);
+  const agents = await deps.store.getAgents(sessionId, page.items);
+  const onlineAll = await deps.store.presenceStatus(sessionId, ids);
   const peers: PeerInfo[] = agents.map((agent) => ({
     ...agent,
-    online: Boolean(online[agent.agent_id]),
+    online: Boolean(onlineAll[agent.agent_id]),
   }));
   return {
     session_id: sessionId,
     peers,
-    peer_count: peers.length,
-    online_count: peers.filter((p) => p.online).length,
+    peer_count: ids.length,
+    online_count: ids.filter((id) => onlineAll[id]).length,
+    next_cursor: page.next_cursor,
+    truncated: page.truncated,
   };
 }
 
@@ -144,22 +163,25 @@ export async function sessionInfo(
   store: string;
   peer_count: number;
   rooms: string[];
+  rooms_truncated: boolean;
   created_at?: string;
   created_by?: string;
 }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
+  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
   const meta = await deps.store.getSessionMeta(sessionId);
-  const agents = await deps.store.listAgents(sessionId);
-  const rooms = await deps.store.listRooms(sessionId);
+  const peer_count = await deps.store.countAgents(sessionId);
+  const allRooms = await deps.store.listRooms(sessionId);
+  const rooms = allRooms.slice(0, SESSION_ROOMS_CAP);
   return {
     session_id: sessionId,
     namespace: deps.config.namespace,
     store: deps.store.kind,
-    peer_count: agents.length,
+    peer_count,
     rooms,
+    rooms_truncated: allRooms.length > rooms.length,
     created_at: meta?.created_at,
     created_by: meta?.created_by,
   };
 }
 
-export { resolveAgentId, resolveSessionId };
+export { requireJoinedSession, resolveInspectSessionId, resolveSessionId };

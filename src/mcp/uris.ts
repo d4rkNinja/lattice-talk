@@ -13,8 +13,8 @@ export function memoryResourceUri(sessionId: string): string {
 }
 
 /** Completions for prompt/resource session_id — config + last join only. */
-export function suggestSessionIds(deps: BusDeps, value: string): string[] {
-  const prefix = value.trim().toLowerCase();
+export function suggestSessionIds(deps: BusDeps, value?: string): string[] {
+  const prefix = (value ?? "").trim().toLowerCase();
   const seen = new Set<string>();
   const out: string[] = [];
   for (const id of [deps.config.defaultSessionId, deps.ctx.sessionId]) {

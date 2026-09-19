@@ -9,7 +9,8 @@ import {
   PULL_MAX_LIMIT,
 } from "./limits.js";
 import { refreshPresence } from "./presence.js";
-import { resolveAgentId, resolveSessionId } from "./resolve.js";
+import { requireJoinedSession } from "./resolve.js";
+import { assertRoomMember } from "./rooms.js";
 import { compareStreamIds } from "./stream.js";
 import type { BusDeps, LatticeMessage, MessageKind, StreamEntry } from "./types.js";
 import { MESSAGE_KINDS } from "./types.js";
@@ -69,11 +70,9 @@ async function outboundFields(
     to?: string;
     body: string;
     kind?: string;
-    role?: string;
-    harness?: string;
   },
 ): Promise<Record<string, string>> {
-  if (!input.body) {
+  if (!input.body?.trim()) {
     throw new UserError("body is required.");
   }
   if (input.body.length > MESSAGE_BODY_MAX_CHARS) {
@@ -82,8 +81,8 @@ async function outboundFields(
   const stored = await deps.store.getAgent(input.sessionId, input.from);
   const fields: Record<string, string> = {
     from: input.from,
-    role: input.role || stored?.role || deps.ctx.role || "agent",
-    harness: input.harness || stored?.harness || deps.ctx.harness || "unknown",
+    role: stored?.role || deps.ctx.role || "agent",
+    harness: stored?.harness || deps.ctx.harness || "unknown",
     kind: parseKind(input.kind),
     body: input.body,
     ts: nowIso(),
@@ -98,28 +97,23 @@ export async function tellRoom(
   deps: BusDeps,
   input: {
     session_id?: string;
-    agent_id?: string;
     room_id?: string;
     body: string;
     kind?: string;
-    role?: string;
-    harness?: string;
   },
 ): Promise<{ message_id: string; room_id: string; session_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
+  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
   const roomId = assertId(input.room_id?.trim() || DEFAULT_ROOM, "room_id");
   const meta = await deps.store.getRoomMeta(sessionId, roomId);
   if (!meta) {
     throw new UserError(`Room ${roomId} does not exist. Create it with create_room first.`);
   }
+  await assertRoomMember(deps, sessionId, roomId, agentId);
   const fields = await outboundFields(deps, {
     sessionId,
     from: agentId,
     body: input.body,
     kind: input.kind,
-    role: input.role,
-    harness: input.harness,
   });
   const streamKey = keys.roomStream(deps.config.namespace, sessionId, roomId);
   const messageId = await deps.store.addStreamMessage(
@@ -138,32 +132,30 @@ export async function tellAgent(
   deps: BusDeps,
   input: {
     session_id?: string;
-    agent_id?: string;
     to_agent_id: string;
     body: string;
     kind?: string;
-    role?: string;
-    harness?: string;
   },
 ): Promise<{ message_id: string; pair: string; session_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const from = resolveAgentId(deps, input.agent_id);
+  const { sessionId, agentId: from } = requireJoinedSession(deps, input.session_id);
   const to = assertId(input.to_agent_id, "to_agent_id");
   if (from === to) {
     throw new UserError("Cannot DM yourself.");
   }
-  const pair = dmPair(from, to);
-  await deps.store.addDmPartner(sessionId, from, to);
-  await deps.store.addDmPartner(sessionId, to, from);
   const fields = await outboundFields(deps, {
     sessionId,
     from,
     to,
     body: input.body,
     kind: input.kind,
-    role: input.role,
-    harness: input.harness,
   });
+  const recipient = await deps.store.getAgent(sessionId, to);
+  if (!recipient) {
+    throw new UserError(`Agent ${to} is not in this session.`);
+  }
+  const pair = dmPair(from, to);
+  await deps.store.addDmPartner(sessionId, from, to);
+  await deps.store.addDmPartner(sessionId, to, from);
   const streamKey = keys.dmStream(deps.config.namespace, sessionId, pair);
   const messageId = await deps.store.addStreamMessage(
     streamKey,
@@ -209,15 +201,13 @@ export async function pullMessages(
   deps: BusDeps,
   input: {
     session_id?: string;
-    agent_id?: string;
     room_id?: string;
     inbox?: boolean;
     other_agent_id?: string;
     limit?: number;
   },
 ): Promise<PullResult> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
+  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
   await refreshPresence(deps, sessionId, agentId);
 
   const limit = clampPullLimit(input.limit);
@@ -229,6 +219,11 @@ export async function pullMessages(
   }
 
   const roomId = assertId(input.room_id?.trim() || DEFAULT_ROOM, "room_id");
+  const meta = await deps.store.getRoomMeta(sessionId, roomId);
+  if (!meta) {
+    throw new UserError(`Room ${roomId} does not exist. Create it with create_room first.`);
+  }
+  await assertRoomMember(deps, sessionId, roomId, agentId);
   const streamKey = keys.roomStream(deps.config.namespace, sessionId, roomId);
   const { messages, next_cursor } = await pullOneStream(
     deps,

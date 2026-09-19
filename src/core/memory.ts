@@ -1,15 +1,21 @@
 import { UserError } from "./errors.js";
 import { assertMemoryKey } from "./ids.js";
-import { MEMORY_LIST_PREVIEW_CHARS, MEMORY_VALUE_MAX_CHARS } from "./limits.js";
-import { resolveAgentId, resolveSessionId } from "./resolve.js";
+import {
+  MEMORY_LIST_DEFAULT_LIMIT,
+  MEMORY_LIST_MAX_LIMIT,
+  MEMORY_LIST_PREVIEW_CHARS,
+  MEMORY_VALUE_MAX_CHARS,
+} from "./limits.js";
 import { truncateBody } from "./messages.js";
+import { clampListLimit, pageSortedKeys } from "./page.js";
+import { requireJoinedSession, resolveProvidedOrInspectSessionId } from "./resolve.js";
 import type { BusDeps } from "./types.js";
 
 export async function memorySet(
   deps: BusDeps,
-  input: { session_id?: string; agent_id?: string; key: string; value: string },
+  input: { session_id?: string; key: string; value: string },
 ): Promise<{ key: string; session_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
+  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
   const key = assertMemoryKey(input.key);
   if (input.value === undefined || input.value === null) {
     throw new UserError("value is required.");
@@ -17,15 +23,9 @@ export async function memorySet(
   if (input.value.length > MEMORY_VALUE_MAX_CHARS) {
     throw new UserError(`value must be at most ${MEMORY_VALUE_MAX_CHARS} characters.`);
   }
-  let updatedBy: string | undefined;
-  try {
-    updatedBy = resolveAgentId(deps, input.agent_id);
-  } catch {
-    updatedBy = undefined;
-  }
   await deps.store.memorySet(sessionId, key, input.value, {
     updated_at: new Date().toISOString(),
-    ...(updatedBy ? { updated_by: updatedBy } : {}),
+    updated_by: agentId,
   });
   return { key, session_id: sessionId };
 }
@@ -34,7 +34,7 @@ export async function memoryGet(
   deps: BusDeps,
   input: { session_id?: string; key: string },
 ): Promise<{ key: string; value: string | null; found: boolean; session_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
+  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
   const key = assertMemoryKey(input.key);
   const value = await deps.store.memoryGet(sessionId, key);
   return { key, value, found: value !== null, session_id: sessionId };
@@ -42,46 +42,54 @@ export async function memoryGet(
 
 export async function memoryList(
   deps: BusDeps,
-  input: { session_id?: string; include_values?: boolean },
+  input: { session_id?: string; include_values?: boolean; cursor?: string; limit?: number },
 ): Promise<{
   session_id: string;
   keys: string[];
   values?: Record<string, string>;
+  next_cursor?: string;
   truncated: boolean;
 }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const all = await deps.store.memoryList(sessionId);
-  const keys = Object.keys(all).sort();
+  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
+  const allKeys = await deps.store.memoryKeys(sessionId);
+  const limit = clampListLimit(input.limit, MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT);
+  const page = pageSortedKeys(allKeys, input.cursor, limit);
   if (!input.include_values) {
-    return { session_id: sessionId, keys, truncated: false };
+    return {
+      session_id: sessionId,
+      keys: page.items,
+      next_cursor: page.next_cursor,
+      truncated: page.truncated,
+    };
   }
+  const rawValues = await deps.store.memoryGetMany(sessionId, page.items);
   const values: Record<string, string> = {};
-  let truncated = false;
-  for (const key of keys) {
-    const raw = all[key] ?? "";
+  let previewTruncated = false;
+  for (const key of page.items) {
+    const raw = rawValues[key] ?? "";
     const cut = truncateBody(raw, MEMORY_LIST_PREVIEW_CHARS);
     values[key] = cut.body;
-    if (cut.truncated) truncated = true;
+    if (cut.truncated) previewTruncated = true;
   }
-  return { session_id: sessionId, keys, values, truncated };
+  return {
+    session_id: sessionId,
+    keys: page.items,
+    values,
+    next_cursor: page.next_cursor,
+    truncated: page.truncated || previewTruncated,
+  };
 }
 
 export async function memoryNote(
   deps: BusDeps,
-  input: { session_id?: string; agent_id?: string; body: string },
+  input: { session_id?: string; body: string },
 ): Promise<{ note_id: string; session_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
+  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
   if (!input.body?.trim()) {
     throw new UserError("body is required.");
   }
-  let from = "unknown";
-  try {
-    from = resolveAgentId(deps, input.agent_id);
-  } catch {
-    from = deps.ctx.agentId ?? "unknown";
-  }
   const noteId = await deps.store.appendNote(sessionId, {
-    from,
+    from: agentId,
     body: input.body,
     ts: new Date().toISOString(),
     kind: "note",

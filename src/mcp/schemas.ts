@@ -12,7 +12,7 @@ export const joinSessionSchema = {
   agent_id: z
     .string()
     .optional()
-    .describe("Stable agent id. Generated if omitted; reused from this process after join."),
+    .describe("Optional self-id at join only. Generated if omitted; reused from this process after join."),
   harness: z
     .string()
     .optional()
@@ -25,59 +25,77 @@ export const joinSessionSchema = {
 };
 
 export const leaveSessionSchema = {
-  session_id: z.string().optional().describe("Session to leave. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Agent leaving. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. This process leaves; you cannot kick another agent."),
 };
 
 export const listPeersSchema = {
-  session_id: z.string().optional().describe("Session to inspect. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
+  cursor: z.string().optional().describe("Paginate after this agent_id (sorted)."),
+  limit: z
+    .coerce.number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Max peers to return. Default 100, max 200."),
 };
 
 export const sessionInfoSchema = {
-  session_id: z.string().optional().describe("Session to inspect. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
 };
 
 export const tellAgentSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Sender agent id. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. Sender is this process."),
   to_agent_id: z.string().describe("Recipient agent id in this session."),
   body: z.string().describe("Message body."),
   kind: z
     .enum(["chat", "status", "task", "system"])
     .optional()
     .describe("Message kind. Default chat."),
-  role: z.string().optional().describe("Override sender role on this message."),
-  harness: z.string().optional().describe("Override sender harness on this message."),
 };
 
 export const tellRoomSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Sender agent id. Defaults to last joined."),
-  room_id: z.string().optional().describe("Room to broadcast. Default main."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. Sender is this process."),
+  room_id: z.string().optional().describe("Room to broadcast. Default main. Caller must be a member."),
   body: z.string().describe("Message body."),
   kind: z
     .enum(["chat", "status", "task", "system"])
     .optional()
     .describe("Message kind. Default chat."),
-  role: z.string().optional().describe("Override sender role on this message."),
-  harness: z.string().optional().describe("Override sender harness on this message."),
 };
 
 export const pullMessagesSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Reader agent id. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. Reader is this process."),
   room_id: z
     .string()
     .optional()
-    .describe("Room to read (default main). Use inbox to pull DMs instead."),
+    .describe("Room to read (default main). Caller must be a member. Use inbox to pull DMs instead."),
   inbox: z
     .boolean()
     .optional()
-    .describe("If true, pull DM inbox (all pair streams, or one if other_agent_id is set)."),
+    .describe("If true, pull this process's DM inbox (all pair streams, or one if other_agent_id is set)."),
   other_agent_id: z
     .string()
     .optional()
-    .describe("When pulling inbox, only this DM pair."),
+    .describe("When pulling inbox, only this DM pair. Does not change who is reading."),
   limit: z
     .coerce.number()
     .int()
@@ -88,46 +106,71 @@ export const pullMessagesSchema = {
 };
 
 export const createRoomSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Creator agent id. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. Creator is this process (added as a member)."),
   room_id: z.string().describe("New room id."),
   display_name: z.string().optional().describe("Optional display name."),
 };
 
 export const joinRoomSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Joining agent id. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. Joiner is this process."),
   room_id: z.string().describe("Room to join."),
 };
 
 export const memorySetSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Who is writing. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. Writer is this process."),
   key: z.string().describe("Memory key."),
   value: z.string().describe("Memory value (shared fact, not a tool dump)."),
 };
 
 export const memoryGetSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
   key: z.string().describe("Memory key to read."),
 };
 
 export const memoryListSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
   include_values: z
     .boolean()
     .optional()
     .describe("If true, include short value previews."),
+  cursor: z.string().optional().describe("Paginate after this key (sorted)."),
+  limit: z
+    .coerce.number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Max keys to return. Default 50, max 200."),
 };
 
 export const memoryNoteSchema = {
-  session_id: z.string().optional().describe("Session id. Defaults to last joined."),
-  agent_id: z.string().optional().describe("Author agent id. Defaults to last joined."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session if set. Author is this process."),
   body: z.string().describe("Append-only note body."),
 };
 
 export const traceContextSchema = {
-  session_id: z.string().optional().describe("Session / conversation id override."),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
 };
 
 const peerOutput = z.object({
@@ -172,6 +215,8 @@ export const listPeersOutputSchema = {
   peers: z.array(peerOutput),
   peer_count: z.number(),
   online_count: z.number(),
+  next_cursor: z.string().optional(),
+  truncated: z.boolean(),
 };
 
 export const sessionInfoOutputSchema = {
@@ -180,6 +225,7 @@ export const sessionInfoOutputSchema = {
   store: z.string(),
   peer_count: z.number(),
   rooms: z.array(z.string()),
+  rooms_truncated: z.boolean(),
   created_at: z.string().optional(),
   created_by: z.string().optional(),
 };
@@ -233,6 +279,7 @@ export const memoryListOutputSchema = {
   session_id: z.string(),
   keys: z.array(z.string()),
   values: z.record(z.string()).optional(),
+  next_cursor: z.string().optional(),
   truncated: z.boolean(),
 };
 

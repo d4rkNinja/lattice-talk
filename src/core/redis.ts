@@ -134,14 +134,31 @@ export class RedisStore implements Store {
     return raw ? parseAgent(raw) : null;
   }
 
-  async listAgents(sessionId: string): Promise<AgentRecord[]> {
-    const all = await this.redis.hgetall(keys.sessionAgents(this.ns, sessionId));
+  async getAgents(sessionId: string, agentIds: string[]): Promise<AgentRecord[]> {
+    if (agentIds.length === 0) return [];
+    const raws = await this.redis.hmget(keys.sessionAgents(this.ns, sessionId), ...agentIds);
     const out: AgentRecord[] = [];
-    for (const raw of Object.values(all)) {
+    for (const raw of raws) {
+      if (!raw) continue;
       const agent = parseAgent(raw);
       if (agent) out.push(agent);
     }
-    return out.sort((a, b) => a.agent_id.localeCompare(b.agent_id));
+    return out;
+  }
+
+  async listAgentIds(sessionId: string): Promise<string[]> {
+    const ids = await this.redis.hkeys(keys.sessionAgents(this.ns, sessionId));
+    return ids.sort();
+  }
+
+  async listAgents(sessionId: string): Promise<AgentRecord[]> {
+    const ids = await this.listAgentIds(sessionId);
+    const agents = await this.getAgents(sessionId, ids);
+    return agents.sort((a, b) => a.agent_id.localeCompare(b.agent_id));
+  }
+
+  async countAgents(sessionId: string): Promise<number> {
+    return this.redis.hlen(keys.sessionAgents(this.ns, sessionId));
   }
 
   async removeAgent(sessionId: string, agentId: string): Promise<void> {
@@ -238,6 +255,10 @@ export class RedisStore implements Store {
     return members.sort();
   }
 
+  async isRoomMember(sessionId: string, roomId: string, agentId: string): Promise<boolean> {
+    return (await this.redis.sismember(keys.roomMembers(this.ns, sessionId, roomId), agentId)) === 1;
+  }
+
   async removeAgentFromAllRooms(sessionId: string, agentId: string): Promise<void> {
     const rooms = await this.listRooms(sessionId);
     if (rooms.length === 0) return;
@@ -318,8 +339,24 @@ export class RedisStore implements Store {
     return this.redis.hget(keys.memoryKv(this.ns, sessionId), key);
   }
 
+  async memoryKeys(sessionId: string): Promise<string[]> {
+    return this.redis.hkeys(keys.memoryKv(this.ns, sessionId));
+  }
+
+  async memoryGetMany(sessionId: string, fieldKeys: string[]): Promise<Record<string, string>> {
+    if (fieldKeys.length === 0) return {};
+    const values = await this.redis.hmget(keys.memoryKv(this.ns, sessionId), ...fieldKeys);
+    const out: Record<string, string> = {};
+    fieldKeys.forEach((k, i) => {
+      const v = values[i];
+      if (v !== null && v !== undefined) out[k] = v;
+    });
+    return out;
+  }
+
   async memoryList(sessionId: string): Promise<Record<string, string>> {
-    return this.redis.hgetall(keys.memoryKv(this.ns, sessionId));
+    const fieldKeys = await this.memoryKeys(sessionId);
+    return this.memoryGetMany(sessionId, fieldKeys);
   }
 
   async appendNote(sessionId: string, fields: Record<string, string>): Promise<string> {

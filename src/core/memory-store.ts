@@ -99,18 +99,28 @@ export class MemoryStore implements Store {
     return JSON.parse(raw) as AgentRecord;
   }
 
-  async listAgents(sessionId: string): Promise<AgentRecord[]> {
-    const h = this.hashes.get(keys.sessionAgents(this.ns, sessionId));
-    if (!h) return [];
+  async getAgents(sessionId: string, agentIds: string[]): Promise<AgentRecord[]> {
     const out: AgentRecord[] = [];
-    for (const raw of h.values()) {
-      try {
-        out.push(JSON.parse(raw) as AgentRecord);
-      } catch {
-        // skip corrupt
-      }
+    for (const id of agentIds) {
+      const agent = await this.getAgent(sessionId, id);
+      if (agent) out.push(agent);
     }
-    return out.sort((a, b) => a.agent_id.localeCompare(b.agent_id));
+    return out;
+  }
+
+  async listAgentIds(sessionId: string): Promise<string[]> {
+    const h = this.hashes.get(keys.sessionAgents(this.ns, sessionId));
+    return h ? [...h.keys()].sort() : [];
+  }
+
+  async listAgents(sessionId: string): Promise<AgentRecord[]> {
+    const ids = await this.listAgentIds(sessionId);
+    const agents = await this.getAgents(sessionId, ids);
+    return agents.sort((a, b) => a.agent_id.localeCompare(b.agent_id));
+  }
+
+  async countAgents(sessionId: string): Promise<number> {
+    return this.hashes.get(keys.sessionAgents(this.ns, sessionId))?.size ?? 0;
   }
 
   async removeAgent(sessionId: string, agentId: string): Promise<void> {
@@ -190,6 +200,10 @@ export class MemoryStore implements Store {
     return [...(this.sets.get(keys.roomMembers(this.ns, sessionId, roomId)) ?? [])].sort();
   }
 
+  async isRoomMember(sessionId: string, roomId: string, agentId: string): Promise<boolean> {
+    return this.sets.get(keys.roomMembers(this.ns, sessionId, roomId))?.has(agentId) ?? false;
+  }
+
   async removeAgentFromAllRooms(sessionId: string, agentId: string): Promise<void> {
     for (const roomId of await this.listRooms(sessionId)) {
       await this.removeRoomMember(sessionId, roomId, agentId);
@@ -266,12 +280,25 @@ export class MemoryStore implements Store {
     return this.hashes.get(keys.memoryKv(this.ns, sessionId))?.get(key) ?? null;
   }
 
-  async memoryList(sessionId: string): Promise<Record<string, string>> {
+  async memoryKeys(sessionId: string): Promise<string[]> {
+    const h = this.hashes.get(keys.memoryKv(this.ns, sessionId));
+    return h ? [...h.keys()] : [];
+  }
+
+  async memoryGetMany(sessionId: string, fieldKeys: string[]): Promise<Record<string, string>> {
     const h = this.hashes.get(keys.memoryKv(this.ns, sessionId));
     const out: Record<string, string> = {};
     if (!h) return out;
-    for (const [k, v] of h) out[k] = v;
+    for (const k of fieldKeys) {
+      const v = h.get(k);
+      if (v !== undefined) out[k] = v;
+    }
     return out;
+  }
+
+  async memoryList(sessionId: string): Promise<Record<string, string>> {
+    const keysOnly = await this.memoryKeys(sessionId);
+    return this.memoryGetMany(sessionId, keysOnly);
   }
 
   async appendNote(sessionId: string, fields: Record<string, string>): Promise<string> {

@@ -39,6 +39,14 @@ describe("tool schemas", () => {
       expect("anyOf" in shape || "oneOf" in shape || "allOf" in shape, name).toBe(false);
     }
 
+    for (const [name, shape] of Object.entries(ALL_TOOL_SCHEMAS)) {
+      if (name === "join_session") {
+        expect("agent_id" in shape).toBe(true);
+      } else {
+        expect("agent_id" in shape, name).toBe(false);
+      }
+    }
+
     expect(Object.keys(ALL_TOOL_OUTPUT_SCHEMAS)).toEqual(names);
     for (const [name, shape] of Object.entries(ALL_TOOL_OUTPUT_SCHEMAS)) {
       expect(Array.isArray(shape), name).toBe(false);

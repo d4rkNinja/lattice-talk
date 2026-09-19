@@ -187,7 +187,11 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
         await requireExistingSession(deps, sessionId, uri.href);
         return jsonContents(
           uri.href,
-          await memoryList(deps, { session_id: sessionId, include_values: false }),
+          await memoryList(deps, {
+            session_id: sessionId,
+            include_values: false,
+            limit: 200,
+          }),
         );
       } catch (err) {
         throwResourceError(err, uri.href);

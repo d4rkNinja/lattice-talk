@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { resolveSessionId } from "../../core/resolve.js";
+import { resolveInspectSessionId } from "../../core/resolve.js";
 import type { BusDeps } from "../../core/types.js";
 import { currentTraceparent } from "../../otel/setup.js";
 import { readOnly } from "../annotations.js";
@@ -19,7 +19,7 @@ export function registerObservabilityTools(server: McpServer, deps: BusDeps): vo
     },
     async (args) =>
       runTool("trace_context", deps, { sessionId: args.session_id }, async () => {
-        const sessionId = resolveSessionId(deps, args.session_id);
+        const sessionId = resolveInspectSessionId(deps, args.session_id);
         return toolOk({
           session_id: sessionId,
           conversation_id: sessionId,

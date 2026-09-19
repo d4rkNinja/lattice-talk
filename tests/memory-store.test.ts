@@ -8,27 +8,28 @@ import { joinSession, leaveSession, listPeers, sessionInfo } from "../src/core/s
 import { makeDeps, testConfig } from "./helpers.js";
 
 describe("MemoryStore session bus", () => {
-  it("stamps role and harness from the sending agent record, not process ctx", async () => {
+  it("stamps role and harness from the sending agent's stored record", async () => {
     const store = new MemoryStore("test");
-    const deps = makeDeps(store);
+    const frontend = makeDeps(store);
+    const backend = makeDeps(store);
 
-    await joinSession(deps, {
+    await joinSession(frontend, {
       session_id: "one-proc",
       role: "frontend",
       agent_id: "fe",
       harness: "cursor",
     });
-    await joinSession(deps, {
+    await joinSession(backend, {
       session_id: "one-proc",
       role: "backend",
       agent_id: "be",
       harness: "claude",
     });
-    expect(deps.ctx.role).toBe("backend");
-    expect(deps.ctx.harness).toBe("claude");
+    expect(backend.ctx.role).toBe("backend");
+    expect(backend.ctx.harness).toBe("claude");
 
-    await tellRoom(deps, { agent_id: "fe", body: "hi from fe" });
-    const pulled = await pullMessages(deps, { agent_id: "be", room_id: "main" });
+    await tellRoom(frontend, { body: "hi from fe" });
+    const pulled = await pullMessages(backend, { room_id: "main" });
     expect(pulled.messages).toHaveLength(1);
     expect(pulled.messages[0]?.from).toBe("fe");
     expect(pulled.messages[0]?.role).toBe("frontend");

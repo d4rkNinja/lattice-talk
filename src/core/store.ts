@@ -11,7 +11,10 @@ export interface Store {
   initSessionMeta(sessionId: string, meta: SessionMeta): Promise<boolean>;
   putAgent(sessionId: string, agent: AgentRecord): Promise<void>;
   getAgent(sessionId: string, agentId: string): Promise<AgentRecord | null>;
+  getAgents(sessionId: string, agentIds: string[]): Promise<AgentRecord[]>;
+  listAgentIds(sessionId: string): Promise<string[]>;
   listAgents(sessionId: string): Promise<AgentRecord[]>;
+  countAgents(sessionId: string): Promise<number>;
   removeAgent(sessionId: string, agentId: string): Promise<void>;
 
   getJoinTokenHash(sessionId: string): Promise<string | null>;
@@ -27,6 +30,7 @@ export interface Store {
   addRoomMember(sessionId: string, roomId: string, agentId: string): Promise<void>;
   removeRoomMember(sessionId: string, roomId: string, agentId: string): Promise<void>;
   listRoomMembers(sessionId: string, roomId: string): Promise<string[]>;
+  isRoomMember(sessionId: string, roomId: string, agentId: string): Promise<boolean>;
   removeAgentFromAllRooms(sessionId: string, agentId: string): Promise<void>;
 
   addStreamMessage(
@@ -49,6 +53,8 @@ export interface Store {
     meta?: Record<string, string>,
   ): Promise<void>;
   memoryGet(sessionId: string, key: string): Promise<string | null>;
+  memoryKeys(sessionId: string): Promise<string[]>;
+  memoryGetMany(sessionId: string, fieldKeys: string[]): Promise<Record<string, string>>;
   memoryList(sessionId: string): Promise<Record<string, string>>;
   appendNote(sessionId: string, fields: Record<string, string>): Promise<string>;
   readNotes(sessionId: string, afterId: string, limit: number): Promise<StreamEntry[]>;

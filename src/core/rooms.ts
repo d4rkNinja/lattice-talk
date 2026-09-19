@@ -1,11 +1,23 @@
 import { UserError } from "./errors.js";
 import { assertId } from "./ids.js";
 import { DEFAULT_ROOM } from "./limits.js";
-import { resolveAgentId, resolveSessionId } from "./resolve.js";
+import { requireJoinedSession } from "./resolve.js";
 import type { BusDeps, RoomMeta } from "./types.js";
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+export async function assertRoomMember(
+  deps: BusDeps,
+  sessionId: string,
+  roomId: string,
+  agentId: string,
+): Promise<void> {
+  const member = await deps.store.isRoomMember(sessionId, roomId, agentId);
+  if (!member) {
+    throw new UserError(`Not a member of room ${roomId}. Call join_room first.`);
+  }
 }
 
 export async function ensureRoom(
@@ -45,13 +57,11 @@ export async function createRoom(
   deps: BusDeps,
   input: {
     session_id?: string;
-    agent_id?: string;
     room_id: string;
     display_name?: string;
   },
 ): Promise<{ room_id: string; created: boolean; session_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
+  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
   const { created, meta } = await ensureRoom(
     deps,
     sessionId,
@@ -65,10 +75,9 @@ export async function createRoom(
 
 export async function joinRoom(
   deps: BusDeps,
-  input: { session_id?: string; agent_id?: string; room_id: string },
+  input: { session_id?: string; room_id: string },
 ): Promise<{ room_id: string; members: number; session_id: string }> {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
+  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
   const roomId = assertId(input.room_id, "room_id");
   const meta = await deps.store.getRoomMeta(sessionId, roomId);
   if (!meta) {

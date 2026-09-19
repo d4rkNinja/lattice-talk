@@ -8,7 +8,7 @@ The MCP process **is** the product. Redis is only the shared store behind it. Th
 
 Canonical docs: [MCP documentation hub](https://modelcontextprotocol.io/docs). **Feature-aligned with 2026-07-28; wire = SDK v1 / initialize for today’s Claude/Cursor/Codex.** We do not speak MCP 2026-07-28 on the wire (`server/discover` + per-request `_meta`). Feature docs snapshot: [2026-07-28 intro](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro).
 
-**Package:** `lattice-talk` (unscoped). Binary: `lattice-talk` → `dist/index.js`. **Not on npm yet** — `npx -y lattice-talk` 404s today.
+**Package:** `lattice-talk` (unscoped). Binary: `lattice-talk` → `dist/index.js`. **Not on npm yet** — `npx -y lattice-talk` 404s until the package is published. Clone this repo and `npm run build` for a local binary.
 
 ## How Lattice follows MCP (feature-aligned with 2026-07-28)
 
@@ -63,14 +63,18 @@ Three stores:
 
 ## Install
 
-**Primary path (works today):** run the bundled binary from this repo. `dist/index.js` is a stdio MCP server (shebang + deps inlined). Requires **Node ≥ 20**. Redis is required for anything beyond one process.
+**Primary path (after publish):** `npx -y lattice-talk`. The npm package ships `dist/`, README, LICENSE, and `package.json`. Requires **Node ≥ 20**. Redis is required for anything beyond one process.
+
+This package is **not on npm yet**. Until it is published, `npx -y lattice-talk` 404s.
+
+**Local from source:** `npm install && npm run build`, then `node dist/index.js` (or `npx lattice-talk` from this repo after build). `dist/` is a build output, not a committed product.
 
 ```json
 {
   "mcpServers": {
     "lattice": {
-      "command": "node",
-      "args": ["D:/Codeverse/lettice-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "lattice-talk"],
       "env": {
         "LATTICE_REDIS_URL": "redis://127.0.0.1:6379/0",
         "LATTICE_NAMESPACE": "dev"
@@ -80,15 +84,11 @@ Three stores:
 }
 ```
 
-Relative path from the workspace root: `args: ["dist/index.js"]`.
+Local-from-source equivalent: `"command": "node"`, `"args": ["dist/index.js"]` after `npm run build` (use an absolute path if the host does not start in this repo).
 
 ```bash
-claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- node D:/Codeverse/lettice-mcp/dist/index.js
+claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- npx -y lattice-talk
 ```
-
-### After publish (unpublished today)
-
-`npx -y lattice-talk` is the intended npm command **after** this package is published. It is **not on npm yet** and 404s if you run it now. Do not present `npx` as the working install path.
 
 ## Official-style server config
 
@@ -98,8 +98,8 @@ Same shape as the [local MCP servers](https://modelcontextprotocol.io/docs/2026-
 {
   "mcpServers": {
     "lattice": {
-      "command": "node",
-      "args": ["D:/Codeverse/lettice-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "lattice-talk"],
       "env": {
         "LATTICE_REDIS_URL": "redis://127.0.0.1:6379/0",
         "LATTICE_NAMESPACE": "dev"
@@ -141,19 +141,19 @@ Lattice is a **local stdio** server. Put the launch command after `--`. Put `--t
 
 ```bash
 # local scope (default): only you, this project — stored in ~/.claude.json
-claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- node D:/Codeverse/lettice-mcp/dist/index.js
+claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- npx -y lattice-talk
 
 # user scope: only you, all projects
-claude mcp add --scope user --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --transport stdio lattice -- node D:/Codeverse/lettice-mcp/dist/index.js
+claude mcp add --scope user --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --transport stdio lattice -- npx -y lattice-talk
 
 # project scope: team-shared .mcp.json at the repo root (Claude Code prompts for approval)
-claude mcp add --scope project --transport stdio lattice -- node D:/Codeverse/lettice-mcp/dist/index.js
+claude mcp add --scope project --transport stdio lattice -- npx -y lattice-talk
 ```
 
 Equivalent JSON (`claude mcp add-json` takes the object *inside* `mcpServers`, not the wrapper):
 
 ```bash
-claude mcp add-json lattice '{"type":"stdio","command":"node","args":["D:/Codeverse/lettice-mcp/dist/index.js"],"env":{"LATTICE_REDIS_URL":"${LATTICE_REDIS_URL}","LATTICE_NAMESPACE":"${LATTICE_NAMESPACE:-dev}"}}'
+claude mcp add-json lattice '{"type":"stdio","command":"npx","args":["-y","lattice-talk"],"env":{"LATTICE_REDIS_URL":"${LATTICE_REDIS_URL}","LATTICE_NAMESPACE":"${LATTICE_NAMESPACE:-dev}"}}'
 ```
 
 Project `.mcp.json` (check this in). Claude Code expands `${VAR}` and `${VAR:-default}` in `command`, `args`, and `env`. A missing `${VAR}` with no default stays literal and warns in `claude mcp list`.
@@ -163,8 +163,8 @@ Project `.mcp.json` (check this in). Claude Code expands `${VAR}` and `${VAR:-de
   "mcpServers": {
     "lattice": {
       "type": "stdio",
-      "command": "node",
-      "args": ["D:/Codeverse/lettice-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "lattice-talk"],
       "env": {
         "LATTICE_REDIS_URL": "${LATTICE_REDIS_URL}",
         "LATTICE_NAMESPACE": "${LATTICE_NAMESPACE:-dev}",
@@ -182,7 +182,7 @@ Project `.mcp.json` (check this in). Claude Code expands `${VAR}` and `${VAR:-de
 | `project` | `.mcp.json` in the project root | Everyone who clones the repo |
 | `user` | `~/.claude.json` top-level `mcpServers` | Only you, all projects |
 
-On Windows, `~/.claude.json` is `%USERPROFILE%\.claude.json`. `claude mcp add` works in PowerShell and Command Prompt. Use `"command": "node"` and the absolute path to `dist/index.js` until the package is published.
+On Windows, `~/.claude.json` is `%USERPROFILE%\.claude.json`. `claude mcp add` works in PowerShell and Command Prompt. Until this package is published, use local-from-source: `npm run build` then `"command": "node"` and the absolute path to `dist/index.js`.
 
 Lattice follows the Claude Code stdio contract: **stdout is MCP JSON-RPC only** (logs go to stderr), tool input schemas are **flat objects** (no root `anyOf` / `oneOf` / `allOf`, ASCII property names), Redis credentials stay in `env`, and tool results stay small (paginate / truncate; Claude Code warns above 10k tokens and caps at 25k by default). OAuth / `--header` apply to remote HTTP servers, not this process.
 
@@ -194,8 +194,8 @@ Lattice follows the Claude Code stdio contract: **stdout is MCP JSON-RPC only** 
 {
   "mcpServers": {
     "lattice": {
-      "command": "node",
-      "args": ["D:/Codeverse/lettice-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "lattice-talk"],
       "env": {
         "LATTICE_REDIS_URL": "redis://127.0.0.1:6379/0",
         "LATTICE_NAMESPACE": "dev"
@@ -211,8 +211,8 @@ Lattice follows the Claude Code stdio contract: **stdout is MCP JSON-RPC only** 
 
 ```toml
 [mcp_servers.lattice]
-command = "node"
-args = ["D:/Codeverse/lettice-mcp/dist/index.js"]
+command = "npx"
+args = ["-y", "lattice-talk"]
 
 [mcp_servers.lattice.env]
 LATTICE_REDIS_URL = "redis://127.0.0.1:6379/0"
@@ -243,26 +243,26 @@ Memory store is **one process**. Two harnesses cannot share it.
 
 ## Tools
 
-After `join_session`, this process remembers `session_id` / `agent_id`. You can still pass them on every call (flat schema). If omitted, `LATTICE_DEFAULT_SESSION_ID` is used for `session_id`.
+After `join_session`, **this process** owns `session_id` / `agent_id`. Mutating tools (`tell_agent`, `tell_room`, `pull_messages`, `memory_set`, `memory_note`, `create_room`, `join_room`, `leave_session`) use that identity — they do not accept another `agent_id`. Read-only tools (`session_info`, `list_peers`, `memory_get`, `memory_list`, `trace_context`) may pass `session_id` only when it matches the joined session or `LATTICE_DEFAULT_SESSION_ID`. `agent_id` remains on `join_session` only (optional self-id). Schemas stay flat.
 
 ### Session / presence
 
 | Tool | Purpose |
 | --- | --- |
 | `join_session` | Register agent, ensure room `main`, start presence (TTL ~45s), return peers |
-| `leave_session` | Leave and clear presence |
-| `list_peers` | Who is in the session; `online` if the presence key exists |
-| `session_info` | Debug: session_id, namespace, peer count, rooms |
+| `leave_session` | This process leaves and clears its presence (cannot kick another agent) |
+| `list_peers` | Who is in the session; `online` if the presence key exists. Paginated (`cursor`, `limit` default 100, max 200) |
+| `session_info` | Debug: session_id, namespace, peer count, rooms (capped) |
 
 ### Messaging
 
 | Tool | Purpose |
 | --- | --- |
-| `tell_agent` | DM another agent |
-| `tell_room` | Broadcast to a room (`room_id` default `main`) |
-| `pull_messages` | Read since cursor (room or inbox), advance cursor, refresh presence |
-| `create_room` | Create a named room |
-| `join_room` | Join room membership |
+| `tell_agent` | DM another agent as this process (`from` is the joined agent; recipient must exist) |
+| `tell_room` | Broadcast to a room as this process (`room_id` default `main`; caller must be a member) |
+| `pull_messages` | Read since **this process's** cursor (room or inbox), advance cursor, refresh presence. Room pulls require membership |
+| `create_room` | Create a named room and add this process as a member |
+| `join_room` | Join room membership as this process |
 
 **Inbox design:** DMs live on a **per-pair stream**. Pair key = sorted agent ids joined by `:` (`backend:frontend`). Cursor id is `dm:{pair}`. `pull_messages` with `inbox=true` reads every pair involving the caller (or one pair if `other_agent_id` is set). Room pulls use `room_id` (default `main`). Default limit 50, max 200. Bodies longer than ~2k characters are truncated with `truncated: true`.
 
@@ -272,7 +272,7 @@ After `join_session`, this process remembers `session_id` / `agent_id`. You can 
 | --- | --- |
 | `memory_set` | Set session key/value |
 | `memory_get` | Get key |
-| `memory_list` | List keys (optional short values) |
+| `memory_list` | List keys (paginated; `cursor`, `limit` default 50, max 200; optional short values) |
 | `memory_note` | Append-only note |
 
 ### Observability
@@ -350,7 +350,8 @@ When set, spans share `gen_ai.conversation.id` = `session_id` so a Cursor agent 
 - Redis credentials: **environment only**, never tool args.
 - `LATTICE_JOIN_TOKEN`: optional shared secret, checked on `join_session` only (timing-safe compare). Hash stored at the session join key.
 - Logs go to **stderr**. stdout is MCP JSON-RPC only (a `console.log` would break the client).
-- Tool results are compact JSON. Claude Code warns above **10,000** tokens and persists results above **25,000** tokens (`MAX_MCP_OUTPUT_TOKENS`). Lists paginate; message bodies over ~2k characters are truncated.
+- After `join_session`, later tools use this process's identity. Passing another `agent_id` is ignored or rejected (the field exists only on `join_session`).
+- Tool results are compact JSON. Claude Code warns above **10,000** tokens and persists results above **25,000** tokens (`MAX_MCP_OUTPUT_TOKENS`). `memory_list` and `list_peers` paginate (`cursor` / `limit`); message bodies over ~2k characters are truncated.
 - Resource URIs are validated (`session_id` charset). Unknown URIs are JSON-RPC invalid params, not an empty `contents` array.
 
 ## Gaps vs the full 2026-07-28 spec
@@ -368,8 +369,9 @@ Honest subset — v1 stays a stdio session bus that current harnesses can launch
 
 ```bash
 npm install
-npm test          # MemoryStore + unit tests; Redis integration skipped unless LATTICE_REDIS_URL is set
-npm run build     # bundled dist/index.js (shebang via tsup banner)
+npm run typecheck
+npm test          # MemoryStore + unit tests; Redis / two-process E2E skipped unless LATTICE_REDIS_URL is set
+npm run build     # bundled dist/index.js (shebang via tsup banner) — required before stdio smoke / E2E
 npm start         # node dist/index.js
 ```
 
@@ -377,7 +379,7 @@ npm start         # node dist/index.js
 LATTICE_STORE=memory node dist/index.js
 ```
 
-Rebuild `dist/` after source changes (`npm run build`). The committed bundle is enough to run MCP without installing dependencies.
+`dist/` is gitignored. Rebuild after source changes (`npm run build`) before running `node dist/index.js` or MCP configs that point at the local binary.
 
 ## License
 

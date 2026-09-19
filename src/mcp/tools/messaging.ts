@@ -23,7 +23,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     "tell_agent",
     {
       description:
-        "Send a DM to another agent in this session. Stored on the sorted pair stream (a:b). The recipient reads it with pull_messages inbox=true.",
+        "Send a DM from this joined process to another agent in this session. Stored on the sorted pair stream (a:b). The recipient reads it with pull_messages inbox=true.",
       inputSchema: tellAgentSchema,
       outputSchema: tellAgentOutputSchema,
       annotations: write("Tell agent"),
@@ -32,7 +32,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       runTool(
         "tell_agent",
         deps,
-        { sessionId: args.session_id, agentId: args.agent_id, harness: args.harness },
+        { sessionId: args.session_id, harness: deps.ctx.harness },
         async () => toolOk(await tellAgent(deps, args)),
       ),
   );
@@ -41,7 +41,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     "tell_room",
     {
       description:
-        "Broadcast a message to a session room (default main). Other agents see it on pull_messages after idle.",
+        "Broadcast a message from this joined process to a session room (default main). Caller must be a room member. Other agents see it on pull_messages after idle.",
       inputSchema: tellRoomSchema,
       outputSchema: tellRoomOutputSchema,
       annotations: write("Tell room"),
@@ -52,9 +52,8 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
         deps,
         {
           sessionId: args.session_id,
-          agentId: args.agent_id,
           roomId: args.room_id,
-          harness: args.harness,
+          harness: deps.ctx.harness,
         },
         async () => toolOk(await tellRoom(deps, args)),
       ),
@@ -64,7 +63,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     "pull_messages",
     {
       description:
-        "Read new messages since this agent's cursor, then advance the cursor and refresh presence. Pass room_id for a room, or inbox=true (optionally other_agent_id) for DMs. Bodies longer than ~2k chars are truncated.",
+        "Read new messages since this process's cursor, then advance the cursor and refresh presence. Pass room_id for a room (must be a member), or inbox=true (optionally other_agent_id) for this process's DMs. Bodies longer than ~2k chars are truncated.",
       inputSchema: pullMessagesSchema,
       outputSchema: pullMessagesOutputSchema,
       annotations: write("Pull messages"),
@@ -73,7 +72,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       runTool(
         "pull_messages",
         deps,
-        { sessionId: args.session_id, agentId: args.agent_id, roomId: args.room_id },
+        { sessionId: args.session_id, roomId: args.room_id },
         async () => toolOk(await pullMessages(deps, args)),
       ),
   );
@@ -81,7 +80,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
   server.registerTool(
     "create_room",
     {
-      description: "Create a named room in the session and add the caller as a member.",
+      description: "Create a named room in the session and add this process as a member.",
       inputSchema: createRoomSchema,
       outputSchema: createRoomOutputSchema,
       annotations: write("Create room"),
@@ -90,7 +89,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       runTool(
         "create_room",
         deps,
-        { sessionId: args.session_id, agentId: args.agent_id, roomId: args.room_id },
+        { sessionId: args.session_id, roomId: args.room_id },
         async () => toolOk(await createRoom(deps, args)),
       ),
   );
@@ -98,7 +97,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
   server.registerTool(
     "join_room",
     {
-      description: "Join an existing room's membership set.",
+      description: "Join an existing room's membership set as this process.",
       inputSchema: joinRoomSchema,
       outputSchema: joinRoomOutputSchema,
       annotations: write("Join room", { idempotentHint: true }),
@@ -107,7 +106,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       runTool(
         "join_room",
         deps,
-        { sessionId: args.session_id, agentId: args.agent_id, roomId: args.room_id },
+        { sessionId: args.session_id, roomId: args.room_id },
         async () => toolOk(await joinRoom(deps, args)),
       ),
   );
