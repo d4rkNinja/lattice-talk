@@ -75,7 +75,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LatticeConfig 
     redisDb: envInt(env.REDIS_DB, 0),
     redisSsl: envFlag(env.REDIS_SSL) || sslFromUrl,
     otelEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim() || undefined,
-    otelServiceName: (env.OTEL_SERVICE_NAME ?? "lattice-mcp").trim() || "lattice-mcp",
+    otelServiceName: (env.OTEL_SERVICE_NAME ?? "lattice-talk").trim() || "lattice-talk",
     otelHeaders: parseOtelHeaders(env.OTEL_EXPORTER_OTLP_HEADERS),
     presenceTtlSeconds: envInt(env.LATTICE_PRESENCE_TTL, PRESENCE_TTL_SECONDS),
     streamMaxLen: envInt(env.LATTICE_STREAM_MAXLEN, STREAM_MAXLEN),

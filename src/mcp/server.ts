@@ -8,6 +8,8 @@ import { log } from "../log.js";
 import { installOtelStderrLogger, setupOtel, type OtelHandle } from "../otel/setup.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../version.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
+import { registerPrompts } from "./prompts.js";
+import { registerResources } from "./resources.js";
 import { registerMemoryTools } from "./tools/memory.js";
 import { registerMessagingTools } from "./tools/messaging.js";
 import { registerObservabilityTools } from "./tools/observability.js";
@@ -27,6 +29,8 @@ export function createMcpServer(deps: BusDeps): McpServer {
   registerMessagingTools(server, deps);
   registerMemoryTools(server, deps);
   registerObservabilityTools(server, deps);
+  registerResources(server, deps);
+  registerPrompts(server, deps);
   return server;
 }
 
@@ -74,6 +78,10 @@ export async function startServer(): Promise<void> {
   });
   process.on("SIGTERM", () => {
     void shutdown("SIGTERM");
+  });
+  // MCP 2026-07-28 stdio: stdin EOF is the portable graceful-shutdown signal.
+  process.stdin.on("end", () => {
+    void shutdown("stdin-eof");
   });
 
   log(

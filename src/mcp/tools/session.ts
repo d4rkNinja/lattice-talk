@@ -23,7 +23,7 @@ export function registerSessionTools(server: McpServer, deps: BusDeps): void {
       description:
         "Join a Lattice session: register this agent, ensure the main room, start presence, and return peers. Same session_id + Redis = same bus across harnesses and machines.",
       inputSchema: joinSessionSchema,
-      annotations: write("Join session"),
+      annotations: write("Join session", { idempotentHint: true }),
     },
     async (args) =>
       runTool(

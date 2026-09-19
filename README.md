@@ -1,16 +1,34 @@
 # Lattice — Cross-Harness MCP Session Bus
 
-Lattice is a **stdio MCP server** that lets AI agents in any harness (Claude Code, Cursor, Codex, or custom) join the **same session**, talk via DMs and rooms, share intentional session memory, and emit OpenTelemetry traces so work stays coherent even when agents run on different machines.
+**[Model Context Protocol](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro)** (MCP) is an open standard for connecting AI applications to external systems — tools, data, and workflows — over JSON-RPC. Think of it as a USB-C port for agents: one protocol, many hosts (Claude, Cursor, Codex, and others).
 
-Install once, point every harness at the same Redis URL + `session_id`. Stop copy-pasting between a frontend agent in Cursor and a backend agent in Claude Code.
+**Lattice** is a **local stdio MCP server** that uses that protocol as a **session bus**. Agents in any harness join the same `session_id`, talk via DMs and rooms, share intentional session memory, and emit OpenTelemetry traces so work stays coherent even when agents run on different machines.
 
 The MCP process **is** the product. Redis is only the shared store behind it. This is not a database platform, not a hosted Lattice HTTP API, and not Redis-as-MCP.
 
-**Package:** `lattice-mcp` (intended scoped publish name: `@scope/lattice-mcp`)
+Official docs this server is written against: [MCP 2026-07-28 intro](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro).
+
+**Package:** `lattice-talk` (unscoped). Binary: `lattice-talk` → `dist/index.js`.
 
 ```bash
-npx -y @scope/lattice-mcp
+npx -y lattice-talk
 ```
+
+## How Lattice follows MCP 2026-07-28
+
+Lattice is a **stdio-only** server: the host launches this process and speaks newline-delimited JSON-RPC on stdin/stdout ([stdio transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)).
+
+| MCP primitive | Lattice |
+| --- | --- |
+| **Tools** (model-controlled) | 14 tools: join/leave/list/info, tell/pull/rooms, memory, `trace_context`. Registered with `McpServer.registerTool` from `@modelcontextprotocol/sdk`. Flat JSON Schema objects (no root `anyOf` / `oneOf` / `allOf`). Annotations: `title`, `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`. Results: `content` text JSON + `structuredContent` + `isError` for execution errors. |
+| **Resources** (application-controlled) | Compact session context, not a filesystem. `lattice://about`, template `lattice://session/{session_id}`, template `lattice://session/{session_id}/memory`. URI + `mimeType` + `resources/read`. |
+| **Prompts** (user-controlled) | `join-session`, `two-agent-handoff`, `pull-and-reply` — slash-style starters that tell the model how to use the tools. |
+| **Logging** | **stderr** (and optional OTEL). Protocol `notifications/message` is [deprecated in 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/deprecated); this server does not adopt it. **Never** write non-protocol bytes to stdout. |
+| **Auth for this process** | Stdio inherits MCP `env`. Redis passwords and `LATTICE_JOIN_TOKEN` stay in env, never in tool args. OAuth / Streamable HTTP are out of scope for v1. |
+
+**Server metadata:** `name` is `lattice-talk`, plus `instructions` for tool search. Capabilities for tools, resources, and prompts are advertised when those primitives are registered.
+
+**SDK note:** Official 2026-07-28 TypeScript samples now use `@modelcontextprotocol/server` (SDK v2: `server/discover`, per-request `_meta`, no `initialize`). Lattice stays on **`@modelcontextprotocol/sdk` v1** so Claude Code, Cursor, and Codex — which still open stdio with the legacy `initialize` handshake — can connect. Feature semantics (tools, resources, prompts, annotations, `isError`, structured content, stderr logging) match the 2026-07-28 docs. See [Gaps](#gaps-vs-the-full-2026-07-28-spec).
 
 ## Why
 
@@ -22,13 +40,14 @@ Two coding agents cannot see each other across harnesses or machines. Users beco
 - A separate always-on Lattice HTTP/API server
 - Clustering UI / Studio
 - A2A as the primary wire protocol
+- Streamable HTTP / OAuth remote hosting
 
 ## How it works
 
 ```
 Harness A (Claude / Cursor / Codex)
-  └─ spawns lattice-mcp (stdio MCP)
-        ├─ tools: join / tell / pull / memory / …
+  └─ spawns lattice-talk (stdio MCP)
+        ├─ tools / resources / prompts
         ├─ Redis (sessions, rooms, streams, presence, memory)
         └─ OTEL exporter (optional)
 
@@ -49,18 +68,14 @@ Three stores:
 ## Install
 
 ```bash
-npx -y @scope/lattice-mcp
+npx -y lattice-talk
 ```
 
-Or publish/link this package as `lattice-mcp` and run `npx -y lattice-mcp`. The binary is `lattice-mcp` → `dist/index.js`.
-
-Requires **Node ≥ 20**. Redis is required for anything beyond one process.
+The binary is `lattice-talk` → `dist/index.js`. Requires **Node ≥ 20**. Redis is required for anything beyond one process.
 
 ### Run from this repo (no npm install)
 
 `dist/index.js` is a bundled stdio MCP server (shebang + deps inlined). Point Claude, Cursor, or Codex at it with `node` and the path to that file — no `npm install` and no `npx` publish step.
-
-Replace the path with the absolute path to this clone:
 
 ```json
 {
@@ -77,15 +92,40 @@ Replace the path with the absolute path to this clone:
 }
 ```
 
-Relative path from the workspace root also works: `args: ["dist/index.js"]`.
-
-Claude Code (local binary, no `npx`):
+Relative path from the workspace root: `args: ["dist/index.js"]`.
 
 ```bash
 claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- node /absolute/path/to/dist/index.js
 ```
 
-A committed `dist/` is for **local MCP**. The intended npm install path remains `npx -y @scope/lattice-mcp` after publish.
+A committed `dist/` is for **local MCP**. The intended npm path remains `npx -y lattice-talk` after publish.
+
+## Official-style server config
+
+Same shape as the [local MCP servers](https://modelcontextprotocol.io/docs/2026-07-28/develop/connect-local-servers) guide (`mcpServers` + `command` / `args` / `env`). Claude Desktop uses `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "lattice": {
+      "command": "npx",
+      "args": ["-y", "lattice-talk"],
+      "env": {
+        "LATTICE_REDIS_URL": "redis://127.0.0.1:6379/0",
+        "LATTICE_NAMESPACE": "dev"
+      }
+    }
+  }
+}
+```
+
+Logs belong on **stderr**. Inspect a running server with:
+
+```bash
+npx @modelcontextprotocol/inspector node dist/index.js
+```
+
+Set `LATTICE_STORE=memory` in the Inspector env for a single-process smoke test.
 
 ## Environment (MCP `env` only)
 
@@ -96,53 +136,34 @@ Agents **never** pass Redis passwords in tool arguments. Configure the MCP serve
 | `LATTICE_REDIS_URL` | if store=redis | — | `redis://user:pass@host:6379/0` (or `rediss://`) |
 | `REDIS_HOST` | alternative | — | Used with `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL` |
 | `LATTICE_NAMESPACE` | no | `dev` | Key prefix namespace |
-| `LATTICE_DEFAULT_SESSION_ID` | no | — | Used when tools omit `session_id` |
+| `LATTICE_DEFAULT_SESSION_ID` | no | — | Used when tools omit `session_id`; also listed as `lattice://session/{id}` |
 | `LATTICE_JOIN_TOKEN` | no | — | Shared secret; `join_session` must send matching `join_token` |
 | `LATTICE_STORE` | no | `redis` | `redis` \| `memory` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | If unset, tracing is a no-op |
-| `OTEL_SERVICE_NAME` | no | `lattice-mcp` | OTEL resource `service.name` |
+| `OTEL_SERVICE_NAME` | no | `lattice-talk` | OTEL resource `service.name` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | no | — | `k=v,k2=v2` or header-line / `k: v` form |
 
 Optional knobs: `LATTICE_PRESENCE_TTL` (seconds, default 45), `LATTICE_STREAM_MAXLEN` (approx XADD MAXLEN, default 1000).
 
-## Harness config
-
-User config target (replace `@scope/lattice-mcp` with `lattice-mcp` if you published unscoped):
-
-```json
-{
-  "mcpServers": {
-    "lattice": {
-      "command": "npx",
-      "args": ["-y", "@scope/lattice-mcp"],
-      "env": {
-        "LATTICE_REDIS_URL": "redis://...",
-        "LATTICE_NAMESPACE": "dev"
-      }
-    }
-  }
-}
-```
-
-### Claude Code
+## Claude Code
 
 Lattice is a **local stdio** server. Put the launch command after `--` so Claude Code does not parse `-y` as its own flag. Put `--transport stdio` between `--env` and the server name (if the name follows `--env` directly, the CLI treats it as another `KEY=value` pair).
 
 ```bash
 # local scope (default): only you, this project — stored in ~/.claude.json
-claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- npx -y @scope/lattice-mcp
+claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- npx -y lattice-talk
 
 # user scope: only you, all projects
-claude mcp add --scope user --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --transport stdio lattice -- npx -y @scope/lattice-mcp
+claude mcp add --scope user --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --transport stdio lattice -- npx -y lattice-talk
 
 # project scope: team-shared .mcp.json at the repo root (Claude Code prompts for approval)
-claude mcp add --scope project --transport stdio lattice -- npx -y @scope/lattice-mcp
+claude mcp add --scope project --transport stdio lattice -- npx -y lattice-talk
 ```
 
 Equivalent JSON (`claude mcp add-json` takes the object *inside* `mcpServers`, not the wrapper):
 
 ```bash
-claude mcp add-json lattice '{"type":"stdio","command":"npx","args":["-y","@scope/lattice-mcp"],"env":{"LATTICE_REDIS_URL":"${LATTICE_REDIS_URL}","LATTICE_NAMESPACE":"${LATTICE_NAMESPACE:-dev}"}}'
+claude mcp add-json lattice '{"type":"stdio","command":"npx","args":["-y","lattice-talk"],"env":{"LATTICE_REDIS_URL":"${LATTICE_REDIS_URL}","LATTICE_NAMESPACE":"${LATTICE_NAMESPACE:-dev}"}}'
 ```
 
 Project `.mcp.json` (check this in). Claude Code expands `${VAR}` and `${VAR:-default}` in `command`, `args`, and `env`. A missing `${VAR}` with no default stays literal and warns in `claude mcp list`.
@@ -153,7 +174,7 @@ Project `.mcp.json` (check this in). Claude Code expands `${VAR}` and `${VAR:-de
     "lattice": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@scope/lattice-mcp"],
+      "args": ["-y", "lattice-talk"],
       "env": {
         "LATTICE_REDIS_URL": "${LATTICE_REDIS_URL}",
         "LATTICE_NAMESPACE": "${LATTICE_NAMESPACE:-dev}",
@@ -179,7 +200,7 @@ $env:MCP_TIMEOUT = "60000"; claude
 
 Lattice follows the Claude Code stdio contract: **stdout is MCP JSON-RPC only** (logs go to stderr), tool input schemas are **flat objects** (no root `anyOf` / `oneOf` / `allOf`, ASCII property names), Redis credentials stay in `env`, and tool results stay small (paginate / truncate; Claude Code warns above 10k tokens and caps at 25k by default). OAuth / `--header` apply to remote HTTP servers, not this process.
 
-### Cursor
+## Cursor
 
 `mcp.json` (Cursor MCP settings):
 
@@ -188,7 +209,7 @@ Lattice follows the Claude Code stdio contract: **stdout is MCP JSON-RPC only** 
   "mcpServers": {
     "lattice": {
       "command": "npx",
-      "args": ["-y", "@scope/lattice-mcp"],
+      "args": ["-y", "lattice-talk"],
       "env": {
         "LATTICE_REDIS_URL": "redis://127.0.0.1:6379/0",
         "LATTICE_NAMESPACE": "dev"
@@ -198,7 +219,7 @@ Lattice follows the Claude Code stdio contract: **stdout is MCP JSON-RPC only** 
 }
 ```
 
-From this repo without install or publish, use `node` and the built file:
+From this repo without install or publish:
 
 ```json
 {
@@ -215,14 +236,14 @@ From this repo without install or publish, use `node` and the built file:
 }
 ```
 
-### Codex
+## Codex
 
 `~/.codex/config.toml` (or project config):
 
 ```toml
 [mcp_servers.lattice]
 command = "npx"
-args = ["-y", "@scope/lattice-mcp"]
+args = ["-y", "lattice-talk"]
 
 [mcp_servers.lattice.env]
 LATTICE_REDIS_URL = "redis://127.0.0.1:6379/0"
@@ -239,7 +260,7 @@ LATTICE_NAMESPACE = "dev"
 6. Agent B: `join_session` with the **same** `session_id=demo-1`, `role=backend`.
 7. `list_peers` on either side shows both (online while presence TTL is fresh).
 8. A: `tell_room` body `hello from A`. B: `pull_messages` (after idle) sees it.
-9. A: `memory_set` `key=api.base` `value=https://api.dev`. B: `memory_get` returns the same value.
+9. A: `memory_set` `key=api.base` `value=https://api.dev`. B: `memory_get` returns the same value. Either side can read `lattice://session/demo-1/memory`.
 10. `trace_context` returns `conversation_id` equal to `session_id`.
 
 Local smoke without Redis:
@@ -299,6 +320,26 @@ Mutating tools emit an OTEL span when an exporter is configured, with:
 
 Outbound stream messages include `traceparent` when a span is active.
 
+## Resources and prompts
+
+These are the other two [core MCP server primitives](https://modelcontextprotocol.io/docs/2026-07-28/learn/server-concepts). They stay small on purpose: Lattice is a session bus, not a filesystem or HTTP API.
+
+| Resource | Kind | What you get |
+| --- | --- | --- |
+| `lattice://about` | static | Package name, spec date, store kind, namespace — no secrets |
+| `lattice://session/{session_id}` | template | Same compact snapshot as `session_info` |
+| `lattice://session/{session_id}/memory` | template | Memory **keys** only (same as `memory_list` without values) |
+
+If `LATTICE_DEFAULT_SESSION_ID` is set, those two session URIs also appear in `resources/list`. Other session ids are readable via the templates. The list does **not** change after `join_session` (2026-07-28: listings must not vary as a side effect of other requests).
+
+| Prompt | Use |
+| --- | --- |
+| `join-session` | Join a session and inspect peers / `lattice://session/{id}` |
+| `two-agent-handoff` | Same `session_id` on two harnesses or machines (Redis required) |
+| `pull-and-reply` | `pull_messages` then `tell_room` / `tell_agent` |
+
+Prompt `session_id` arguments support completions from the default session and the last join.
+
 ## Redis key layout
 
 Prefix: `lattice:{ns}:...`
@@ -341,6 +382,18 @@ When set, spans share `gen_ai.conversation.id` = `session_id` so a Cursor agent 
 - `LATTICE_JOIN_TOKEN`: optional shared secret, checked on `join_session` only (timing-safe compare). Hash stored at the session join key.
 - Logs go to **stderr**. stdout is MCP JSON-RPC only (a `console.log` would break the client).
 - Tool results are compact JSON. Claude Code warns above **10,000** tokens and persists results above **25,000** tokens (`MAX_MCP_OUTPUT_TOKENS`). Lists paginate; message bodies over ~2k characters are truncated.
+- Resource URIs are validated (`session_id` charset). Unknown URIs are JSON-RPC invalid params, not an empty `contents` array.
+
+## Gaps vs the full 2026-07-28 spec
+
+Honest subset — v1 stays a stdio session bus that current harnesses can launch:
+
+- **Wire era:** SDK v1 still speaks `initialize`. 2026-07-28 removed that handshake for `server/discover` + per-request `_meta`. Dual-era / modern-only servers use `@modelcontextprotocol/server` (SDK v2). We do not migrate, so Claude Code / Cursor / Codex keep working.
+- **No Streamable HTTP, OAuth, MCP Apps, Tasks extension, elicitation / MRTR.**
+- **No protocol logging capability** (deprecated; stderr + OTEL instead).
+- **No resource subscriptions** (`subscriptions/listen`) — session data changes through tools; re-read the URI when you need a snapshot.
+- **No `outputSchema` on tools** — `structuredContent` is the same object as the text JSON.
+- Completions exist only for `session_id` on prompts/resource templates.
 
 ## Develop
 

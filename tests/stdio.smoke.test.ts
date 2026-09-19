@@ -43,7 +43,7 @@ describe.skipIf(!existsSync(distEntry))("built stdio MCP server", () => {
       }, 8_000);
       child.stderr.on("data", (chunk: Buffer) => {
         stderr += chunk.toString("utf8");
-        if (stderr.includes("[lattice-mcp]")) {
+        if (stderr.includes("[lattice-talk]")) {
           clearTimeout(timer);
           resolve();
         }
@@ -53,7 +53,7 @@ describe.skipIf(!existsSync(distEntry))("built stdio MCP server", () => {
         reject(err);
       });
       child.once("exit", (code) => {
-        if (!stderr.includes("[lattice-mcp]")) {
+        if (!stderr.includes("[lattice-talk]")) {
           clearTimeout(timer);
           reject(new Error(`exited ${code} before logging; stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`));
         }
@@ -64,7 +64,7 @@ describe.skipIf(!existsSync(distEntry))("built stdio MCP server", () => {
       child.once("close", () => resolve());
     });
     expect(stdout, "stdout must stay empty until a client speaks MCP").toBe("");
-    expect(stderr).toMatch(/\[lattice-mcp\]/);
+    expect(stderr).toMatch(/\[lattice-talk\]/);
   });
 
   it("runs over stdio, lists flat annotated tools, and joins a memory-store session", async () => {

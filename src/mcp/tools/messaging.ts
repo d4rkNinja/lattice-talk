@@ -91,7 +91,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     {
       description: "Join an existing room's membership set.",
       inputSchema: joinRoomSchema,
-      annotations: write("Join room"),
+      annotations: write("Join room", { idempotentHint: true }),
     },
     async (args) =>
       runTool(

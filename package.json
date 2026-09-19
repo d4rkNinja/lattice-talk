@@ -1,11 +1,11 @@
 {
-  "name": "lattice-mcp",
+  "name": "lattice-talk",
   "version": "1.0.0",
   "description": "Lattice — Cross-Harness MCP Session Bus. Shared sessions, DMs, rooms, memory, and OpenTelemetry for agents across Claude Code, Cursor, Codex, and custom harnesses.",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "lattice-mcp": "./dist/index.js"
+    "lattice-talk": "./dist/index.js"
   },
   "files": [
     "dist",

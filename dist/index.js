@@ -26257,7 +26257,7 @@ init_esm_shims();
 // src/log.ts
 init_esm_shims();
 function log(...args) {
-  console.error("[lattice-mcp]", ...args);
+  console.error("[lattice-talk]", ...args);
 }
 function redactUrl(url) {
   try {
@@ -39660,6 +39660,15 @@ var Server = class extends Protocol {
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
 init_esm_shims();
 var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
+function completable(schema, complete) {
+  Object.defineProperty(schema, COMPLETABLE_SYMBOL, {
+    value: { complete },
+    enumerable: false,
+    writable: false,
+    configurable: false
+  });
+  return schema;
+}
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
@@ -39674,6 +39683,226 @@ var McpZodTypeKind;
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/uriTemplate.js
 init_esm_shims();
+var MAX_TEMPLATE_LENGTH = 1e6;
+var MAX_VARIABLE_LENGTH = 1e6;
+var MAX_TEMPLATE_EXPRESSIONS = 1e4;
+var MAX_REGEX_LENGTH = 1e6;
+var UriTemplate = class _UriTemplate {
+  /**
+   * Returns true if the given string contains any URI template expressions.
+   * A template expression is a sequence of characters enclosed in curly braces,
+   * like {foo} or {?bar}.
+   */
+  static isTemplate(str) {
+    return /\{[^}\s]+\}/.test(str);
+  }
+  static validateLength(str, max, context2) {
+    if (str.length > max) {
+      throw new Error(`${context2} exceeds maximum length of ${max} characters (got ${str.length})`);
+    }
+  }
+  get variableNames() {
+    return this.parts.flatMap((part) => typeof part === "string" ? [] : part.names);
+  }
+  constructor(template) {
+    _UriTemplate.validateLength(template, MAX_TEMPLATE_LENGTH, "Template");
+    this.template = template;
+    this.parts = this.parse(template);
+  }
+  toString() {
+    return this.template;
+  }
+  parse(template) {
+    const parts = [];
+    let currentText = "";
+    let i = 0;
+    let expressionCount = 0;
+    while (i < template.length) {
+      if (template[i] === "{") {
+        if (currentText) {
+          parts.push(currentText);
+          currentText = "";
+        }
+        const end = template.indexOf("}", i);
+        if (end === -1)
+          throw new Error("Unclosed template expression");
+        expressionCount++;
+        if (expressionCount > MAX_TEMPLATE_EXPRESSIONS) {
+          throw new Error(`Template contains too many expressions (max ${MAX_TEMPLATE_EXPRESSIONS})`);
+        }
+        const expr = template.slice(i + 1, end);
+        const operator = this.getOperator(expr);
+        const exploded = expr.includes("*");
+        const names = this.getNames(expr);
+        const name = names[0];
+        for (const name2 of names) {
+          _UriTemplate.validateLength(name2, MAX_VARIABLE_LENGTH, "Variable name");
+        }
+        parts.push({ name, operator, names, exploded });
+        i = end + 1;
+      } else {
+        currentText += template[i];
+        i++;
+      }
+    }
+    if (currentText) {
+      parts.push(currentText);
+    }
+    return parts;
+  }
+  getOperator(expr) {
+    const operators = ["+", "#", ".", "/", "?", "&"];
+    return operators.find((op) => expr.startsWith(op)) || "";
+  }
+  getNames(expr) {
+    const operator = this.getOperator(expr);
+    return expr.slice(operator.length).split(",").map((name) => name.replace("*", "").trim()).filter((name) => name.length > 0);
+  }
+  encodeValue(value, operator) {
+    _UriTemplate.validateLength(value, MAX_VARIABLE_LENGTH, "Variable value");
+    if (operator === "+" || operator === "#") {
+      return encodeURI(value);
+    }
+    return encodeURIComponent(value);
+  }
+  expandPart(part, variables) {
+    if (part.operator === "?" || part.operator === "&") {
+      const pairs = part.names.map((name) => {
+        const value2 = variables[name];
+        if (value2 === void 0)
+          return "";
+        const encoded2 = Array.isArray(value2) ? value2.map((v) => this.encodeValue(v, part.operator)).join(",") : this.encodeValue(value2.toString(), part.operator);
+        return `${name}=${encoded2}`;
+      }).filter((pair) => pair.length > 0);
+      if (pairs.length === 0)
+        return "";
+      const separator = part.operator === "?" ? "?" : "&";
+      return separator + pairs.join("&");
+    }
+    if (part.names.length > 1) {
+      const values2 = part.names.map((name) => variables[name]).filter((v) => v !== void 0);
+      if (values2.length === 0)
+        return "";
+      return values2.map((v) => Array.isArray(v) ? v[0] : v).join(",");
+    }
+    const value = variables[part.name];
+    if (value === void 0)
+      return "";
+    const values = Array.isArray(value) ? value : [value];
+    const encoded = values.map((v) => this.encodeValue(v, part.operator));
+    switch (part.operator) {
+      case "":
+        return encoded.join(",");
+      case "+":
+        return encoded.join(",");
+      case "#":
+        return "#" + encoded.join(",");
+      case ".":
+        return "." + encoded.join(".");
+      case "/":
+        return "/" + encoded.join("/");
+      default:
+        return encoded.join(",");
+    }
+  }
+  expand(variables) {
+    let result = "";
+    let hasQueryParam = false;
+    for (const part of this.parts) {
+      if (typeof part === "string") {
+        result += part;
+        continue;
+      }
+      const expanded = this.expandPart(part, variables);
+      if (!expanded)
+        continue;
+      if ((part.operator === "?" || part.operator === "&") && hasQueryParam) {
+        result += expanded.replace("?", "&");
+      } else {
+        result += expanded;
+      }
+      if (part.operator === "?" || part.operator === "&") {
+        hasQueryParam = true;
+      }
+    }
+    return result;
+  }
+  escapeRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  partToRegExp(part) {
+    const patterns = [];
+    for (const name2 of part.names) {
+      _UriTemplate.validateLength(name2, MAX_VARIABLE_LENGTH, "Variable name");
+    }
+    if (part.operator === "?" || part.operator === "&") {
+      for (let i = 0; i < part.names.length; i++) {
+        const name2 = part.names[i];
+        const prefix = i === 0 ? "\\" + part.operator : "&";
+        patterns.push({
+          pattern: prefix + this.escapeRegExp(name2) + "=([^&]+)",
+          name: name2
+        });
+      }
+      return patterns;
+    }
+    let pattern;
+    const name = part.name;
+    switch (part.operator) {
+      case "":
+        pattern = part.exploded ? "([^/,]+(?:,[^/,]+)*)" : "([^/,]+)";
+        break;
+      case "+":
+      case "#":
+        pattern = "(.+)";
+        break;
+      case ".":
+        pattern = "\\.([^/,]+)";
+        break;
+      case "/":
+        pattern = "/" + (part.exploded ? "([^/,]+(?:,[^/,]+)*)" : "([^/,]+)");
+        break;
+      default:
+        pattern = "([^/]+)";
+    }
+    patterns.push({ pattern, name });
+    return patterns;
+  }
+  match(uri) {
+    _UriTemplate.validateLength(uri, MAX_TEMPLATE_LENGTH, "URI");
+    let pattern = "^";
+    const names = [];
+    for (const part of this.parts) {
+      if (typeof part === "string") {
+        pattern += this.escapeRegExp(part);
+      } else {
+        const patterns = this.partToRegExp(part);
+        for (const { pattern: partPattern, name } of patterns) {
+          pattern += partPattern;
+          names.push({ name, exploded: part.exploded });
+        }
+      }
+    }
+    pattern += "$";
+    _UriTemplate.validateLength(pattern, MAX_REGEX_LENGTH, "Generated regex pattern");
+    const regex = new RegExp(pattern);
+    const match = uri.match(regex);
+    if (!match)
+      return null;
+    const result = {};
+    for (let i = 0; i < names.length; i++) {
+      const { name, exploded } = names[i];
+      const value = match[i + 1];
+      const cleanName = name.replace("*", "");
+      if (exploded && value.includes(",")) {
+        result[cleanName] = value.split(",");
+      } else {
+        result[cleanName] = value;
+      }
+    }
+    return result;
+  }
+};
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/toolNameValidation.js
 init_esm_shims();
@@ -40469,6 +40698,30 @@ var McpServer = class {
     }
   }
 };
+var ResourceTemplate = class {
+  constructor(uriTemplate, _callbacks) {
+    this._callbacks = _callbacks;
+    this._uriTemplate = typeof uriTemplate === "string" ? new UriTemplate(uriTemplate) : uriTemplate;
+  }
+  /**
+   * Gets the URI template pattern.
+   */
+  get uriTemplate() {
+    return this._uriTemplate;
+  }
+  /**
+   * Gets the list callback, if one was provided.
+   */
+  get listCallback() {
+    return this._callbacks.list;
+  }
+  /**
+   * Gets the callback for completing a specific URI template variable, if one was provided.
+   */
+  completeCallback(variable) {
+    return this._callbacks.complete?.[variable];
+  }
+};
 var EMPTY_OBJECT_JSON_SCHEMA = {
   type: "object",
   properties: {}
@@ -40718,7 +40971,7 @@ function loadConfig(env = process.env) {
     redisDb: envInt(env.REDIS_DB, 0),
     redisSsl: envFlag(env.REDIS_SSL) || sslFromUrl,
     otelEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim() || void 0,
-    otelServiceName: (env.OTEL_SERVICE_NAME ?? "lattice-mcp").trim() || "lattice-mcp",
+    otelServiceName: (env.OTEL_SERVICE_NAME ?? "lattice-talk").trim() || "lattice-talk",
     otelHeaders: parseOtelHeaders(env.OTEL_EXPORTER_OTLP_HEADERS),
     presenceTtlSeconds: envInt(env.LATTICE_PRESENCE_TTL, PRESENCE_TTL_SECONDS),
     streamMaxLen: envInt(env.LATTICE_STREAM_MAXLEN, STREAM_MAXLEN)
@@ -42730,7 +42983,7 @@ function setupOtel(config2) {
   }
 }
 function getTracer() {
-  return trace.getTracer("lattice-mcp", "1.0.0");
+  return trace.getTracer("lattice-talk", "1.0.0");
 }
 function currentTraceparent() {
   const carrier = {};
@@ -42771,23 +43024,166 @@ async function withSpan(name, attrs, fn) {
 
 // src/version.ts
 init_esm_shims();
-var PACKAGE_NAME = "lattice-mcp";
+var PACKAGE_NAME = "lattice-talk";
 var PACKAGE_VERSION = "1.0.0";
 
 // src/mcp/instructions.ts
 init_esm_shims();
 var SERVER_INSTRUCTIONS = [
-  "Lattice is a local stdio MCP session bus for agents in Claude Code, Cursor, Codex, and custom harnesses.",
+  "Lattice (package lattice-talk) is a local stdio MCP session bus for agents in Claude Code, Cursor, Codex, and custom harnesses.",
   "Search these tools when multiple agents must share one session_id: join the session, DM or room-chat, pull new messages, and store short shared facts.",
   "Always join_session first (same session_id + Redis URL + namespace = the same bus across machines). Redis credentials and LATTICE_JOIN_TOKEN live in MCP env, never as Redis-password tool arguments.",
   "pull_messages paginates (default 50, max 200) and truncates bodies over ~2k characters so results stay under Claude Code\u2019s MCP output limits (warn at 10k tokens, default cap 25k).",
+  "Read lattice://about or lattice://session/{session_id} for compact session/memory context. User prompts: join-session, two-agent-handoff, pull-and-reply.",
   "LATTICE_STORE=memory is single-process only. Cross-harness and cross-machine require Redis."
 ].join(" ");
 
-// src/mcp/tools/memory.ts
+// src/mcp/prompts.ts
 init_esm_shims();
 
-// src/core/memory.ts
+// src/mcp/protocol.ts
+init_esm_shims();
+var MCP_SPEC_DATE = "2026-07-28";
+var MCP_INTRO_URL = "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro";
+var MCP_SPEC_URL = "https://modelcontextprotocol.io/specification/2026-07-28";
+var MCP_TS_SDK_PACKAGE = "@modelcontextprotocol/sdk";
+
+// src/mcp/uris.ts
+init_esm_shims();
+var ABOUT_RESOURCE_URI = "lattice://about";
+var SESSION_URI_TEMPLATE = "lattice://session/{session_id}";
+var MEMORY_URI_TEMPLATE = "lattice://session/{session_id}/memory";
+function sessionResourceUri(sessionId) {
+  return `lattice://session/${sessionId}`;
+}
+function memoryResourceUri(sessionId) {
+  return `lattice://session/${sessionId}/memory`;
+}
+function suggestSessionIds(deps, value) {
+  const prefix = value.trim().toLowerCase();
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const id of [deps.config.defaultSessionId, deps.ctx.sessionId]) {
+    if (!id || seen.has(id)) continue;
+    if (prefix && !id.toLowerCase().startsWith(prefix)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out.slice(0, 100);
+}
+
+// src/mcp/prompts.ts
+function sessionIdArg(deps) {
+  return completable(
+    external_exports.string().optional().describe("Session id. Falls back to last join or LATTICE_DEFAULT_SESSION_ID."),
+    (value) => suggestSessionIds(deps, value)
+  );
+}
+function registerPrompts(server, deps) {
+  server.registerPrompt(
+    "join-session",
+    {
+      title: "Join a Lattice session",
+      description: "Start using this stdio MCP bus: join a shared session_id, then inspect peers and the session resource.",
+      argsSchema: {
+        session_id: sessionIdArg(deps),
+        role: external_exports.string().describe("This agent's role, e.g. frontend, backend, reviewer.")
+      }
+    },
+    ({ session_id, role }) => {
+      const sid = session_id?.trim() || deps.ctx.sessionId || deps.config.defaultSessionId || "<session_id>";
+      const agentRole = role?.trim() || "<role>";
+      return {
+        description: `Join Lattice session ${sid} as ${agentRole}`,
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: [
+                `You are connected to Lattice (npm package ${PACKAGE_NAME}), a local stdio MCP session bus written against MCP ${MCP_SPEC_DATE}.`,
+                `1. Call join_session with session_id=${sid} and role=${agentRole}. Do not pass Redis passwords or URLs as tool arguments; they live in the MCP process env.`,
+                `2. Call list_peers, or read resource ${sessionResourceUri(sid)} for a compact snapshot.`,
+                "3. After idle, pull_messages (room main and/or inbox=true). Share short facts with memory_set, not raw tool dumps.",
+                `4. Optional context: ${memoryResourceUri(sid)} lists shared memory keys.`
+              ].join("\n")
+            }
+          }
+        ]
+      };
+    }
+  );
+  server.registerPrompt(
+    "two-agent-handoff",
+    {
+      title: "Two-agent / two-machine handoff",
+      description: "Same session_id on two harnesses or machines. Requires Redis (LATTICE_STORE=memory is one process only).",
+      argsSchema: {
+        session_id: sessionIdArg(deps),
+        my_role: external_exports.string().describe("Role for this agent, e.g. frontend."),
+        other_role: external_exports.string().optional().describe("Expected peer role, e.g. backend.")
+      }
+    },
+    ({ session_id, my_role, other_role }) => {
+      const sid = session_id?.trim() || deps.ctx.sessionId || deps.config.defaultSessionId || "demo-1";
+      const mine = my_role?.trim() || "frontend";
+      const other = other_role?.trim() || "backend";
+      return {
+        description: `Handoff on session ${sid} (${mine} \u2194 ${other})`,
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: [
+                `Two agents share Lattice session_id=${sid}. Package ${PACKAGE_NAME}. Both MCP configs must use the same LATTICE_REDIS_URL, LATTICE_NAMESPACE, and optional LATTICE_JOIN_TOKEN (env only).`,
+                `This agent: join_session session_id=${sid} role=${mine}. The other agent: join_session session_id=${sid} role=${other}.`,
+                "Confirm with list_peers (online while presence TTL is fresh).",
+                "Send tell_room or tell_agent. The other side calls pull_messages after idle (inbox=true for DMs).",
+                `Put durable facts in memory_set. Read ${sessionResourceUri(sid)} and ${memoryResourceUri(sid)} for compact context.`,
+                "LATTICE_STORE=memory cannot cross processes. Cross-machine requires Redis."
+              ].join("\n")
+            }
+          }
+        ]
+      };
+    }
+  );
+  server.registerPrompt(
+    "pull-and-reply",
+    {
+      title: "Pull messages and reply",
+      description: "Read new room or inbox messages since the cursor, then reply.",
+      argsSchema: {
+        session_id: sessionIdArg(deps),
+        inbox: external_exports.string().optional().describe("Set true to pull DMs instead of the main room.")
+      }
+    },
+    ({ session_id, inbox }) => {
+      const sid = session_id?.trim() || deps.ctx.sessionId || deps.config.defaultSessionId || "<session_id>";
+      const wantInbox = inbox?.trim().toLowerCase() === "true";
+      return {
+        description: wantInbox ? `Pull inbox on ${sid}` : `Pull room main on ${sid}`,
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: [
+                `If you have not joined, call join_session for session_id=${sid} first.`,
+                wantInbox ? "Call pull_messages with inbox=true (optionally other_agent_id for one pair). Default limit 50, max 200." : "Call pull_messages for room main (or pass room_id). Default limit 50, max 200.",
+                "Reply with tell_room or tell_agent. Bodies over ~2k characters are truncated.",
+                `Optional snapshot: ${sessionResourceUri(sid)}.`
+              ].join("\n")
+            }
+          }
+        ]
+      };
+    }
+  );
+}
+
+// src/mcp/resources.ts
 init_esm_shims();
 
 // src/core/errors.ts
@@ -42829,6 +43225,9 @@ function optionalId(value, field) {
   if (value === void 0 || value === "") return void 0;
   return assertId(value, field);
 }
+
+// src/core/memory.ts
+init_esm_shims();
 
 // src/core/resolve.ts
 init_esm_shims();
@@ -43114,6 +43513,318 @@ async function memoryNote(deps, input) {
   return { note_id: noteId, session_id: sessionId };
 }
 
+// src/core/session.ts
+init_esm_shims();
+import { randomUUID } from "crypto";
+
+// src/core/crypto.ts
+init_esm_shims();
+import { createHash, timingSafeEqual } from "crypto";
+function sha256Hex(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+function safeEqual(a, b) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) {
+    timingSafeEqual(left, left);
+    return false;
+  }
+  return timingSafeEqual(left, right);
+}
+
+// src/core/rooms.ts
+init_esm_shims();
+function nowIso2() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+async function ensureRoom(deps, sessionId, roomId, createdBy, displayName) {
+  const rid = assertId(roomId, "room_id");
+  const existing = await deps.store.getRoomMeta(sessionId, rid);
+  if (existing) {
+    return { created: false, meta: existing };
+  }
+  const meta = {
+    room_id: rid,
+    session_id: sessionId,
+    display_name: displayName?.trim() || rid,
+    created_at: nowIso2(),
+    created_by: createdBy
+  };
+  const created = await deps.store.addRoom(sessionId, rid, meta);
+  const finalMeta = await deps.store.getRoomMeta(sessionId, rid) ?? meta;
+  return { created, meta: finalMeta };
+}
+async function ensureMainRoom(deps, sessionId, agentId) {
+  await ensureRoom(deps, sessionId, DEFAULT_ROOM, agentId, DEFAULT_ROOM);
+  await deps.store.addRoomMember(sessionId, DEFAULT_ROOM, agentId);
+}
+async function createRoom(deps, input) {
+  const sessionId = resolveSessionId(deps, input.session_id);
+  const agentId = resolveAgentId(deps, input.agent_id);
+  const { created, meta } = await ensureRoom(
+    deps,
+    sessionId,
+    input.room_id,
+    agentId,
+    input.display_name
+  );
+  await deps.store.addRoomMember(sessionId, meta.room_id, agentId);
+  return { room_id: meta.room_id, created, session_id: sessionId };
+}
+async function joinRoom(deps, input) {
+  const sessionId = resolveSessionId(deps, input.session_id);
+  const agentId = resolveAgentId(deps, input.agent_id);
+  const roomId = assertId(input.room_id, "room_id");
+  const meta = await deps.store.getRoomMeta(sessionId, roomId);
+  if (!meta) {
+    throw new UserError(`Room ${roomId} does not exist. Create it with create_room first.`);
+  }
+  await deps.store.addRoomMember(sessionId, roomId, agentId);
+  const members = await deps.store.listRoomMembers(sessionId, roomId);
+  return { room_id: roomId, members: members.length, session_id: sessionId };
+}
+
+// src/core/session.ts
+function nowIso3() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function assertJoinToken(deps, provided) {
+  const expected = deps.config.joinToken;
+  if (!expected) return;
+  if (!provided) {
+    throw new UserError("join_token is required for this Lattice server.", "auth");
+  }
+  if (!safeEqual(provided, expected)) {
+    throw new UserError("join_token is invalid.", "auth");
+  }
+}
+async function joinSession(deps, input) {
+  assertJoinToken(deps, input.join_token);
+  const role = input.role?.trim();
+  if (!role) {
+    throw new UserError("role is required.");
+  }
+  const sessionId = resolveSessionId(deps, input.session_id);
+  const agentId = optionalId(input.agent_id, "agent_id") ?? (deps.ctx.sessionId === sessionId ? deps.ctx.agentId : void 0) ?? randomUUID();
+  let created = false;
+  const existingMeta = await deps.store.getSessionMeta(sessionId);
+  if (!existingMeta) {
+    const meta = {
+      session_id: sessionId,
+      namespace: deps.config.namespace,
+      created_at: nowIso3(),
+      created_by: agentId
+    };
+    created = await deps.store.initSessionMeta(sessionId, meta);
+  }
+  if (deps.config.joinToken) {
+    await deps.store.setJoinTokenHash(sessionId, sha256Hex(deps.config.joinToken));
+  }
+  const existingAgent = await deps.store.getAgent(sessionId, agentId);
+  const agent = {
+    agent_id: agentId,
+    role,
+    harness: input.harness?.trim() || existingAgent?.harness || "unknown",
+    display_name: input.display_name?.trim() || existingAgent?.display_name || role || agentId,
+    joined_at: existingAgent?.joined_at ?? nowIso3()
+  };
+  await deps.store.putAgent(sessionId, agent);
+  await ensureMainRoom(deps, sessionId, agent.agent_id);
+  await refreshPresence(deps, sessionId, agent.agent_id);
+  deps.ctx.rememberJoin(sessionId, agent);
+  const peers = await listPeers(deps, { session_id: sessionId });
+  return {
+    session_id: sessionId,
+    agent_id: agent.agent_id,
+    namespace: deps.config.namespace,
+    room_id: DEFAULT_ROOM,
+    peers: peers.peers,
+    created
+  };
+}
+async function leaveSession(deps, input) {
+  const sessionId = resolveSessionId(deps, input.session_id);
+  const agentId = resolveAgentId(deps, input.agent_id);
+  await deps.store.clearPresence(sessionId, agentId);
+  await deps.store.removeAgentFromAllRooms(sessionId, agentId);
+  await deps.store.removeAgent(sessionId, agentId);
+  deps.ctx.clearIf(sessionId, agentId);
+  return { left: true, session_id: sessionId, agent_id: agentId };
+}
+async function listPeers(deps, input = {}) {
+  const sessionId = resolveSessionId(deps, input.session_id);
+  const agents = await deps.store.listAgents(sessionId);
+  const online = await deps.store.presenceStatus(
+    sessionId,
+    agents.map((a) => a.agent_id)
+  );
+  const peers = agents.map((agent) => ({
+    ...agent,
+    online: Boolean(online[agent.agent_id])
+  }));
+  return {
+    session_id: sessionId,
+    peers,
+    peer_count: peers.length,
+    online_count: peers.filter((p) => p.online).length
+  };
+}
+async function sessionInfo(deps, input = {}) {
+  const sessionId = resolveSessionId(deps, input.session_id);
+  const meta = await deps.store.getSessionMeta(sessionId);
+  const agents = await deps.store.listAgents(sessionId);
+  const rooms = await deps.store.listRooms(sessionId);
+  return {
+    session_id: sessionId,
+    namespace: deps.config.namespace,
+    store: deps.store.kind,
+    peer_count: agents.length,
+    rooms,
+    created_at: meta?.created_at,
+    created_by: meta?.created_by
+  };
+}
+
+// src/mcp/resources.ts
+function jsonContents(uri, data) {
+  return {
+    contents: [
+      {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify(data)
+      }
+    ]
+  };
+}
+function throwResourceError(err, uri) {
+  if (isUserError(err)) {
+    throw new McpError(ErrorCode.InvalidParams, err.message, { uri });
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  throw new McpError(ErrorCode.InternalError, message, { uri });
+}
+function parseSessionId(raw, uri) {
+  const value = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : "";
+  try {
+    return assertId(String(value ?? ""), "session_id");
+  } catch (err) {
+    throwResourceError(err, uri);
+  }
+}
+function listedDefaultSession(deps) {
+  const sid = deps.config.defaultSessionId;
+  if (!sid) return { resources: [] };
+  return {
+    resources: [
+      {
+        uri: sessionResourceUri(sid),
+        name: "session",
+        title: "Default session",
+        description: "Compact session_info for LATTICE_DEFAULT_SESSION_ID.",
+        mimeType: "application/json"
+      }
+    ]
+  };
+}
+function listedDefaultMemory(deps) {
+  const sid = deps.config.defaultSessionId;
+  if (!sid) return { resources: [] };
+  return {
+    resources: [
+      {
+        uri: memoryResourceUri(sid),
+        name: "session-memory",
+        title: "Default session memory",
+        description: "Shared memory key list for LATTICE_DEFAULT_SESSION_ID.",
+        mimeType: "application/json"
+      }
+    ]
+  };
+}
+function registerResources(server, deps) {
+  server.registerResource(
+    "about",
+    ABOUT_RESOURCE_URI,
+    {
+      title: "Lattice about",
+      description: "Server identity, MCP 2026-07-28 primitives, and how to use this stdio session bus. No secrets.",
+      mimeType: "application/json"
+    },
+    async (uri) => jsonContents(uri.href, {
+      name: PACKAGE_NAME,
+      version: PACKAGE_VERSION,
+      product: "Lattice",
+      transport: "stdio",
+      spec: MCP_SPEC_DATE,
+      spec_url: MCP_SPEC_URL,
+      docs: MCP_INTRO_URL,
+      sdk: MCP_TS_SDK_PACKAGE,
+      primitives: ["tools", "resources", "prompts"],
+      store: deps.store.kind,
+      namespace: deps.config.namespace,
+      default_session_id: deps.config.defaultSessionId ?? null,
+      resources: {
+        about: ABOUT_RESOURCE_URI,
+        session: SESSION_URI_TEMPLATE,
+        memory: MEMORY_URI_TEMPLATE
+      },
+      how_to: "Call join_session, then tell_agent / tell_room / pull_messages / memory_*. Read lattice://session/{session_id} for a compact snapshot. Redis credentials stay in MCP env."
+    })
+  );
+  server.registerResource(
+    "session",
+    new ResourceTemplate(SESSION_URI_TEMPLATE, {
+      list: async () => listedDefaultSession(deps),
+      complete: {
+        session_id: (value) => suggestSessionIds(deps, value)
+      }
+    }),
+    {
+      title: "Session snapshot",
+      description: "Read-only session_info (peers, rooms, store kind). Same data as the session_info tool. Not a filesystem.",
+      mimeType: "application/json"
+    },
+    async (uri, variables) => {
+      const sessionId = parseSessionId(variables.session_id, uri.href);
+      try {
+        return jsonContents(uri.href, await sessionInfo(deps, { session_id: sessionId }));
+      } catch (err) {
+        throwResourceError(err, uri.href);
+      }
+    }
+  );
+  server.registerResource(
+    "session-memory",
+    new ResourceTemplate(MEMORY_URI_TEMPLATE, {
+      list: async () => listedDefaultMemory(deps),
+      complete: {
+        session_id: (value) => suggestSessionIds(deps, value)
+      }
+    }),
+    {
+      title: "Session memory keys",
+      description: "Read-only shared memory key list (no long values). Same compact view as memory_list without include_values.",
+      mimeType: "application/json"
+    },
+    async (uri, variables) => {
+      const sessionId = parseSessionId(variables.session_id, uri.href);
+      try {
+        return jsonContents(
+          uri.href,
+          await memoryList(deps, { session_id: sessionId, include_values: false })
+        );
+      } catch (err) {
+        throwResourceError(err, uri.href);
+      }
+    }
+  );
+}
+
+// src/mcp/tools/memory.ts
+init_esm_shims();
+
 // src/mcp/annotations.ts
 init_esm_shims();
 function readOnly(title) {
@@ -43144,14 +43855,25 @@ function destructive(title) {
 
 // src/mcp/result.ts
 init_esm_shims();
+function asStructured(data) {
+  if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+    return data;
+  }
+  return void 0;
+}
 function toolOk(data) {
+  const text = JSON.stringify(data);
+  const structuredContent = asStructured(data);
   return {
-    content: [{ type: "text", text: JSON.stringify(data) }]
+    content: [{ type: "text", text }],
+    ...structuredContent ? { structuredContent } : {}
   };
 }
 function toolErr(message, extra) {
+  const payload = { error: message, ...extra };
   return {
-    content: [{ type: "text", text: JSON.stringify({ error: message, ...extra }) }],
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    structuredContent: payload,
     isError: true
   };
 }
@@ -43327,60 +44049,6 @@ function registerMemoryTools(server, deps) {
 
 // src/mcp/tools/messaging.ts
 init_esm_shims();
-
-// src/core/rooms.ts
-init_esm_shims();
-function nowIso2() {
-  return (/* @__PURE__ */ new Date()).toISOString();
-}
-async function ensureRoom(deps, sessionId, roomId, createdBy, displayName) {
-  const rid = assertId(roomId, "room_id");
-  const existing = await deps.store.getRoomMeta(sessionId, rid);
-  if (existing) {
-    return { created: false, meta: existing };
-  }
-  const meta = {
-    room_id: rid,
-    session_id: sessionId,
-    display_name: displayName?.trim() || rid,
-    created_at: nowIso2(),
-    created_by: createdBy
-  };
-  const created = await deps.store.addRoom(sessionId, rid, meta);
-  const finalMeta = await deps.store.getRoomMeta(sessionId, rid) ?? meta;
-  return { created, meta: finalMeta };
-}
-async function ensureMainRoom(deps, sessionId, agentId) {
-  await ensureRoom(deps, sessionId, DEFAULT_ROOM, agentId, DEFAULT_ROOM);
-  await deps.store.addRoomMember(sessionId, DEFAULT_ROOM, agentId);
-}
-async function createRoom(deps, input) {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
-  const { created, meta } = await ensureRoom(
-    deps,
-    sessionId,
-    input.room_id,
-    agentId,
-    input.display_name
-  );
-  await deps.store.addRoomMember(sessionId, meta.room_id, agentId);
-  return { room_id: meta.room_id, created, session_id: sessionId };
-}
-async function joinRoom(deps, input) {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
-  const roomId = assertId(input.room_id, "room_id");
-  const meta = await deps.store.getRoomMeta(sessionId, roomId);
-  if (!meta) {
-    throw new UserError(`Room ${roomId} does not exist. Create it with create_room first.`);
-  }
-  await deps.store.addRoomMember(sessionId, roomId, agentId);
-  const members = await deps.store.listRoomMembers(sessionId, roomId);
-  return { room_id: roomId, members: members.length, session_id: sessionId };
-}
-
-// src/mcp/tools/messaging.ts
 function registerMessagingTools(server, deps) {
   server.registerTool(
     "tell_agent",
@@ -43448,7 +44116,7 @@ function registerMessagingTools(server, deps) {
     {
       description: "Join an existing room's membership set.",
       inputSchema: joinRoomSchema,
-      annotations: write("Join room")
+      annotations: write("Join room", { idempotentHint: true })
     },
     async (args) => runTool(
       "join_room",
@@ -43483,136 +44151,13 @@ function registerObservabilityTools(server, deps) {
 
 // src/mcp/tools/session.ts
 init_esm_shims();
-
-// src/core/session.ts
-init_esm_shims();
-import { randomUUID } from "crypto";
-
-// src/core/crypto.ts
-init_esm_shims();
-import { createHash, timingSafeEqual } from "crypto";
-function sha256Hex(value) {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-function safeEqual(a, b) {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  if (left.length !== right.length) {
-    timingSafeEqual(left, left);
-    return false;
-  }
-  return timingSafeEqual(left, right);
-}
-
-// src/core/session.ts
-function nowIso3() {
-  return (/* @__PURE__ */ new Date()).toISOString();
-}
-function assertJoinToken(deps, provided) {
-  const expected = deps.config.joinToken;
-  if (!expected) return;
-  if (!provided) {
-    throw new UserError("join_token is required for this Lattice server.", "auth");
-  }
-  if (!safeEqual(provided, expected)) {
-    throw new UserError("join_token is invalid.", "auth");
-  }
-}
-async function joinSession(deps, input) {
-  assertJoinToken(deps, input.join_token);
-  const role = input.role?.trim();
-  if (!role) {
-    throw new UserError("role is required.");
-  }
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = optionalId(input.agent_id, "agent_id") ?? (deps.ctx.sessionId === sessionId ? deps.ctx.agentId : void 0) ?? randomUUID();
-  let created = false;
-  const existingMeta = await deps.store.getSessionMeta(sessionId);
-  if (!existingMeta) {
-    const meta = {
-      session_id: sessionId,
-      namespace: deps.config.namespace,
-      created_at: nowIso3(),
-      created_by: agentId
-    };
-    created = await deps.store.initSessionMeta(sessionId, meta);
-  }
-  if (deps.config.joinToken) {
-    await deps.store.setJoinTokenHash(sessionId, sha256Hex(deps.config.joinToken));
-  }
-  const existingAgent = await deps.store.getAgent(sessionId, agentId);
-  const agent = {
-    agent_id: agentId,
-    role,
-    harness: input.harness?.trim() || existingAgent?.harness || "unknown",
-    display_name: input.display_name?.trim() || existingAgent?.display_name || role || agentId,
-    joined_at: existingAgent?.joined_at ?? nowIso3()
-  };
-  await deps.store.putAgent(sessionId, agent);
-  await ensureMainRoom(deps, sessionId, agent.agent_id);
-  await refreshPresence(deps, sessionId, agent.agent_id);
-  deps.ctx.rememberJoin(sessionId, agent);
-  const peers = await listPeers(deps, { session_id: sessionId });
-  return {
-    session_id: sessionId,
-    agent_id: agent.agent_id,
-    namespace: deps.config.namespace,
-    room_id: DEFAULT_ROOM,
-    peers: peers.peers,
-    created
-  };
-}
-async function leaveSession(deps, input) {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agentId = resolveAgentId(deps, input.agent_id);
-  await deps.store.clearPresence(sessionId, agentId);
-  await deps.store.removeAgentFromAllRooms(sessionId, agentId);
-  await deps.store.removeAgent(sessionId, agentId);
-  deps.ctx.clearIf(sessionId, agentId);
-  return { left: true, session_id: sessionId, agent_id: agentId };
-}
-async function listPeers(deps, input = {}) {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const agents = await deps.store.listAgents(sessionId);
-  const online = await deps.store.presenceStatus(
-    sessionId,
-    agents.map((a) => a.agent_id)
-  );
-  const peers = agents.map((agent) => ({
-    ...agent,
-    online: Boolean(online[agent.agent_id])
-  }));
-  return {
-    session_id: sessionId,
-    peers,
-    peer_count: peers.length,
-    online_count: peers.filter((p) => p.online).length
-  };
-}
-async function sessionInfo(deps, input = {}) {
-  const sessionId = resolveSessionId(deps, input.session_id);
-  const meta = await deps.store.getSessionMeta(sessionId);
-  const agents = await deps.store.listAgents(sessionId);
-  const rooms = await deps.store.listRooms(sessionId);
-  return {
-    session_id: sessionId,
-    namespace: deps.config.namespace,
-    store: deps.store.kind,
-    peer_count: agents.length,
-    rooms,
-    created_at: meta?.created_at,
-    created_by: meta?.created_by
-  };
-}
-
-// src/mcp/tools/session.ts
 function registerSessionTools(server, deps) {
   server.registerTool(
     "join_session",
     {
       description: "Join a Lattice session: register this agent, ensure the main room, start presence, and return peers. Same session_id + Redis = same bus across harnesses and machines.",
       inputSchema: joinSessionSchema,
-      annotations: write("Join session")
+      annotations: write("Join session", { idempotentHint: true })
     },
     async (args) => runTool(
       "join_session",
@@ -43686,6 +44231,8 @@ function createMcpServer(deps) {
   registerMessagingTools(server, deps);
   registerMemoryTools(server, deps);
   registerObservabilityTools(server, deps);
+  registerResources(server, deps);
+  registerPrompts(server, deps);
   return server;
 }
 async function startServer() {
@@ -43729,6 +44276,9 @@ async function startServer() {
   });
   process.on("SIGTERM", () => {
     void shutdown("SIGTERM");
+  });
+  process.stdin.on("end", () => {
+    void shutdown("stdin-eof");
   });
   log(
     `starting store=${store.kind} namespace=${config2.namespace} otel=${otel.enabled ? "on" : "off"}`

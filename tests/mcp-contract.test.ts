@@ -109,5 +109,18 @@ describe("Claude Code MCP contract", () => {
     expect(result.isError).toBe(true);
     const text = (result.content as { type: string; text?: string }[])[0]?.text ?? "";
     expect(text).toMatch(/role/i);
+    expect(result.structuredContent).toMatchObject({ error: expect.stringMatching(/role/i) });
+  });
+
+  it("returns structuredContent alongside text JSON on success", async () => {
+    const result = await client.callTool({
+      name: "join_session",
+      arguments: { session_id: "contract-1", role: "tester", harness: "vitest" },
+    });
+    expect(result.isError).toBeFalsy();
+    const text = (result.content as { type: string; text?: string }[])[0]?.text ?? "";
+    const parsed = JSON.parse(text) as { session_id: string };
+    expect(parsed.session_id).toBe("contract-1");
+    expect(result.structuredContent).toMatchObject({ session_id: "contract-1" });
   });
 });

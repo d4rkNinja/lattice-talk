@@ -1,8 +1,9 @@
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 
 /**
- * MCP tool annotations. Claude Agent SDK uses readOnlyHint to batch
- * read-only calls; destructiveHint is informational.
+ * MCP 2026-07-28 tool annotations (title, readOnlyHint, destructiveHint,
+ * openWorldHint, idempotentHint). Clients treat these as untrusted hints.
+ * Claude Code uses readOnlyHint to batch read-only calls.
  */
 export function readOnly(title: string): ToolAnnotations {
   return {

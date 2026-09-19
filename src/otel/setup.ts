@@ -80,7 +80,7 @@ export function setupOtel(config: LatticeConfig): OtelHandle {
 }
 
 export function getTracer(): Tracer {
-  return trace.getTracer("lattice-mcp", "1.0.0");
+  return trace.getTracer("lattice-talk", "1.0.0");
 }
 
 export function currentTraceparent(): string | undefined {
