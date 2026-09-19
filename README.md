@@ -1,44 +1,375 @@
-# Lattice
+# Lattice Talk
 
-Local **stdio** [MCP](https://modelcontextprotocol.io/docs) server that is a **session bus**. Agents in Claude Code, Cursor, Codex, or a custom host join the same `session_id`, then DM, talk in rooms, share short session memory, and emit optional OpenTelemetry spans.
+**Cross-harness communication for AI coding agents.**
 
-The MCP process is the product. Redis is only the shared store. This is not a hosted Lattice API and not Redis-as-MCP.
+Lattice Talk is a local **MCP server** that lets AI agents running in different tools — such as Claude Code, Cursor, Codex, or custom MCP clients — join the same session and communicate with each other.
 
-**Package:** [`lattice-talk`](https://github.com/d4rkNinja/lattice-talk) (unscoped). Binary: `lattice-talk` → `dist/index.js`. **Node ≥ 20.**
+Instead of manually copying messages between agents, give them the same `session_id`.
 
-**Not on npm yet.** `npx -y lattice-talk` 404s until the package is published. Until then, build from this repo and point the host at `node dist/index.js`.
+They can then:
 
-## Features
+* discover each other
+* send direct messages
+* communicate through shared rooms
+* share session memory
+* coordinate work across different machines
+* emit OpenTelemetry traces for debugging and observability
 
-- Join one `session_id` from any harness or machine (Redis required across processes)
-- DMs (recipient must exist) and rooms (membership enforced)
-- Intentional shared memory (KV + append-only notes) — not raw tool dumps
-- 14 tools, 3 resources, 3 prompts; `openWorldHint: false` (closed store)
-- Optional OTLP traces with `gen_ai.conversation.id` = `session_id`
+```text
+Cursor Agent ───────┐
+                    │
+Claude Code Agent ──┼── Lattice Talk ── Redis
+                    │        │
+Codex Agent ────────┘        └── OpenTelemetry
+```
 
-## Install
+Lattice itself is not a hosted API or database platform.
 
-**After publish:**
+**The MCP process is the product. Redis is simply the shared coordination layer behind it.**
+
+---
+
+## Why Lattice?
+
+Running multiple coding agents is becoming normal.
+
+You might have:
+
+```text
+Cursor
+  └─ frontend agent
+
+Claude Code
+  └─ backend agent
+
+Codex
+  └─ reviewer agent
+```
+
+The problem is that these agents normally cannot see each other.
+
+You become the communication layer:
+
+```text
+Frontend agent → you → Backend agent
+Backend agent → you → Reviewer agent
+Reviewer agent → you → Frontend agent
+```
+
+Lattice replaces that manual handoff.
+
+```text
+frontend ─┐
+backend  ─┼── session: checkout-redesign
+reviewer ─┘
+```
+
+Agents can communicate directly through MCP tools.
+
+---
+
+# What can agents do?
+
+### Join a shared session
+
+```text
+join_session
+```
+
+Agents using the same:
+
+```text
+session_id
+Redis
+namespace
+```
+
+join the same coordination space.
+
+---
+
+### See other agents
+
+```text
+list_peers
+```
+
+Example:
+
+```json
+{
+  "peers": [
+    {
+      "agent_id": "frontend",
+      "role": "frontend",
+      "harness": "cursor",
+      "online": true
+    },
+    {
+      "agent_id": "backend",
+      "role": "backend",
+      "harness": "claude-code",
+      "online": true
+    }
+  ]
+}
+```
+
+---
+
+### Send direct messages
+
+```text
+tell_agent
+```
+
+Example:
+
+```text
+frontend → backend
+
+"Authentication UI is ready.
+The frontend expects POST /api/auth/login."
+```
+
+The backend agent can later receive it through:
+
+```text
+pull_messages
+```
+
+---
+
+### Talk in shared rooms
+
+Every session automatically has:
+
+```text
+main
+```
+
+Agents can broadcast:
+
+```text
+tell_room
+```
+
+You can also create dedicated rooms:
+
+```text
+frontend
+backend
+architecture
+review
+deployment
+```
+
+Only joined room members can read or send messages in that room.
+
+---
+
+### Share memory
+
+Agents can store important facts using:
+
+```text
+memory_set
+memory_get
+memory_list
+memory_note
+```
+
+Example:
+
+```text
+api.base = https://api.example.com/v1
+```
+
+Another agent can retrieve it without asking you.
+
+Shared memory is intended for things like:
+
+* architecture decisions
+* API contracts
+* important URLs
+* implementation constraints
+* task ownership
+* shared project facts
+
+It is **not intended to be a raw dump of every tool call**.
+
+---
+
+### Trace multi-agent work
+
+Lattice can optionally export OpenTelemetry traces.
+
+All operations in one Lattice session use:
+
+```text
+gen_ai.conversation.id = session_id
+```
+
+This makes it possible to correlate work performed by agents across different harnesses and machines.
+
+---
+
+# Architecture
+
+Each AI application launches its own local Lattice MCP process.
+
+```text
+Machine A
+
+Cursor
+  │
+  └─ lattice-talk
+       │
+       └─────────────┐
+                     │
+                  Redis
+                     │
+       ┌─────────────┘
+       │
+  lattice-talk
+  │
+Claude Code
+
+Machine B
+```
+
+There is no central Lattice HTTP server.
+
+Redis provides shared state between MCP processes.
+
+---
+
+## Storage model
+
+Lattice uses three logical stores.
+
+| Store      | Purpose                                                 |
+| ---------- | ------------------------------------------------------- |
+| **Bus**    | sessions, agents, rooms, messages, presence and cursors |
+| **Memory** | intentional shared session knowledge                    |
+| **Traces** | OpenTelemetry spans and agent activity                  |
+
+Redis powers the bus and shared memory.
+
+OpenTelemetry is optional.
+
+---
+
+# Requirements
+
+* Node.js **20+**
+* Redis for communication across processes or machines
+
+For local single-process testing, Redis is optional:
+
+```bash
+LATTICE_STORE=memory
+```
+
+The memory store is useful for development and tests, but two different MCP processes cannot share it.
+
+---
+
+# Installation
+
+## npm
+
+The intended installation method is:
 
 ```bash
 npx -y lattice-talk
 ```
 
-**From this repo today:**
+> The package is currently not published to npm yet. Until it is published, build it locally from this repository.
+
+---
+
+## Run from source
+
+Clone the repository:
+
+```bash
+git clone https://github.com/d4rkNinja/lattice-talk.git
+cd lattice-talk
+```
+
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Build:
+
+```bash
 npm run build
+```
+
+Run:
+
+```bash
 node dist/index.js
 ```
 
-`dist/` is a build output (gitignored). Rebuild after source changes. Do not treat a committed bundle as the product.
+For a Redis-free local test:
 
-Redis is required for anything beyond one process. For a single-process smoke test, set `LATTICE_STORE=memory` in the MCP env.
+```bash
+LATTICE_STORE=memory node dist/index.js
+```
 
-### Claude Code / Cursor (`mcp.json`)
+---
 
-After publish:
+# Configuration
+
+Lattice is configured through environment variables.
+
+Secrets such as Redis credentials are **never passed through MCP tool arguments**.
+
+| Variable                      | Default        | Description                          |
+| ----------------------------- | -------------- | ------------------------------------ |
+| `LATTICE_REDIS_URL`           | —              | Redis connection URL                 |
+| `LATTICE_NAMESPACE`           | `dev`          | Namespace used for Redis keys        |
+| `LATTICE_DEFAULT_SESSION_ID`  | —              | Optional default session             |
+| `LATTICE_JOIN_TOKEN`          | —              | Optional shared session access token |
+| `LATTICE_STORE`               | `redis`        | `redis` or `memory`                  |
+| `LATTICE_PRESENCE_TTL`        | `45`           | Agent presence TTL in seconds        |
+| `LATTICE_STREAM_MAXLEN`       | `1000`         | Approximate max messages per stream  |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | —              | OpenTelemetry OTLP endpoint          |
+| `OTEL_SERVICE_NAME`           | `lattice-talk` | OpenTelemetry service name           |
+| `OTEL_EXPORTER_OTLP_HEADERS`  | —              | Optional OTLP authentication headers |
+
+You can also configure Redis using:
+
+```text
+REDIS_HOST
+REDIS_PORT
+REDIS_USERNAME
+REDIS_PASSWORD
+REDIS_DB
+REDIS_SSL
+```
+
+---
+
+# Claude Code
+
+After the package is published:
+
+```bash
+claude mcp add \
+  --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 \
+  --env LATTICE_NAMESPACE=dev \
+  --transport stdio \
+  lattice \
+  -- npx -y lattice-talk
+```
+
+Project `.mcp.json`:
 
 ```json
 {
@@ -50,40 +381,48 @@ After publish:
       "env": {
         "LATTICE_REDIS_URL": "${LATTICE_REDIS_URL}",
         "LATTICE_NAMESPACE": "${LATTICE_NAMESPACE:-dev}",
-        "LATTICE_JOIN_TOKEN": "${LATTICE_JOIN_TOKEN}",
-        "OTEL_EXPORTER_OTLP_ENDPOINT": "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+        "LATTICE_JOIN_TOKEN": "${LATTICE_JOIN_TOKEN}"
       }
     }
   }
 }
 ```
 
-Local-from-source (until npm publish): `"command": "node"`, `"args": ["/absolute/path/to/lattice-talk/dist/index.js"]` after `npm run build` (absolute path if the host does not start in this repo). Put Redis URL and namespace in `env` — never as tool arguments.
+For local development, replace the command with your built file:
 
-Claude Code expands `${VAR}` and `${VAR:-default}` in `command`, `args`, and `env`. A missing `${VAR}` with no default stays literal. Cursor uses the same `mcpServers` / `command` / `args` / `env` shape (Cursor may omit `"type"`).
-
-```bash
-# command goes after --
-claude mcp add --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 --env LATTICE_NAMESPACE=dev --transport stdio lattice -- npx -y lattice-talk
+```json
+{
+  "command": "node",
+  "args": ["/absolute/path/to/lattice-talk/dist/index.js"]
+}
 ```
 
-`--transport stdio` must sit between `--env` and the server name. Scopes: `local` (default, `~/.claude.json` for this project), `user` (all your projects), `project` (checked-in `.mcp.json`).
+---
 
-```bash
-claude mcp add-json lattice '{"type":"stdio","command":"npx","args":["-y","lattice-talk"],"env":{"LATTICE_REDIS_URL":"${LATTICE_REDIS_URL}","LATTICE_NAMESPACE":"${LATTICE_NAMESPACE:-dev}"}}'
+# Cursor
+
+Add Lattice to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "lattice": {
+      "command": "npx",
+      "args": ["-y", "lattice-talk"],
+      "env": {
+        "LATTICE_REDIS_URL": "redis://127.0.0.1:6379/0",
+        "LATTICE_NAMESPACE": "dev"
+      }
+    }
+  }
+}
 ```
 
-Until publish, swap the command after `--` for `node` plus the absolute path to `dist/index.js`.
+---
 
-Logs go to **stderr**. Inspect a local build with:
+# Codex
 
-```bash
-npx @modelcontextprotocol/inspector node dist/index.js
-```
-
-### Codex
-
-`~/.codex/config.toml` (or project config):
+Example configuration:
 
 ```toml
 [mcp_servers.lattice]
@@ -95,146 +434,692 @@ LATTICE_REDIS_URL = "redis://127.0.0.1:6379/0"
 LATTICE_NAMESPACE = "dev"
 ```
 
-Same unpublished caveat: use `command = "node"` and `args = ["<absolute>/dist/index.js"]` until `lattice-talk` is on npm.
+---
 
-## Tools
+# Quick two-agent example
 
-14 tools. Flat JSON Schema objects (no root `anyOf` / `oneOf` / `allOf`). Results: text JSON + `structuredContent` + `isError` on execution errors. `list_peers` and `memory_list` paginate (`cursor`, `limit`; defaults 100 / 50, max 200). `pull_messages` default limit 50, max 200; bodies over ~2k characters set `truncated: true`.
+Suppose you want Cursor and Claude Code to work together.
 
-After `join_session`, **this process** owns `session_id` / `agent_id`. Mutating tools do not take `agent_id`. Optional `session_id` on those tools must match the joined session. Read-only tools may pass `session_id` only when it matches the joined session or `LATTICE_DEFAULT_SESSION_ID`. `agent_id` exists only on `join_session` (optional self-id).
+Both clients use:
 
-| Tool | Purpose |
-| --- | --- |
-| `join_session` | Register this agent, ensure room `main`, start presence (~45s TTL), return peers |
-| `leave_session` | This process leaves and clears its presence (cannot kick another agent) |
-| `list_peers` | Who is in the session; `online` if the presence key exists. Paginated |
-| `session_info` | Compact debug: session_id, namespace, peer count, rooms (capped) |
-| `tell_agent` | DM another agent as this process. Recipient must already be in the session |
-| `tell_room` | Broadcast as this process (`room_id` default `main`). Caller must be a member |
-| `pull_messages` | Read since **this process's** cursor (room or inbox), advance it, refresh presence. Room pulls require membership |
-| `create_room` | Create a room and add this process as a member |
-| `join_room` | Join a room as this process |
-| `memory_set` | Set a session key/value (shared fact, not a tool dump) |
-| `memory_get` | Get a key |
-| `memory_list` | List keys (paginated; optional short values) |
-| `memory_note` | Append-only note |
-| `trace_context` | `{ session_id, conversation_id, traceparent, namespace }` |
+```text
+LATTICE_REDIS_URL=redis://127.0.0.1:6379/0
+LATTICE_NAMESPACE=dev
+```
 
-**DMs:** per-pair Redis stream. Pair key = sorted agent ids joined by `:` (e.g. `backend:frontend`). Cursor id is `dm:{pair}`. `pull_messages` with `inbox=true` reads every pair involving this process, or one pair if `other_agent_id` is set.
+### Cursor agent
 
-**Rooms:** `tell_room` / room `pull_messages` call `assertRoomMember`. Non-members cannot send or read.
+```text
+join_session
 
-**Traces:** mutating tools emit an OTEL span when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (`gen_ai.conversation.id` = `session_id`). Outbound stream messages include `traceparent` when a span is active. If the endpoint is unset, tracing is a no-op.
+session_id: checkout-v2
+role: frontend
+agent_id: frontend
+harness: cursor
+```
 
-## Resources
+### Claude Code agent
 
-| Resource | Kind | What you get |
-| --- | --- | --- |
-| `lattice://about` | static | Package name, spec date, store kind, namespace — no secrets |
-| `lattice://session/{session_id}` | template | Same compact snapshot as `session_info` |
-| `lattice://session/{session_id}/memory` | template | Memory **keys** only (same as `memory_list` without values) |
+```text
+join_session
 
-If `LATTICE_DEFAULT_SESSION_ID` is set, those two session URIs also appear in `resources/list`. Other session ids are readable via the templates **only if that session has been joined** (has session meta). Unknown session ids return JSON-RPC **`-32602`** (`Resource not found`), not an empty success body. The list does not change after `join_session` (`listChanged: false`).
+session_id: checkout-v2
+role: backend
+agent_id: backend
+harness: claude-code
+```
 
-## Prompts
+Now either agent can call:
 
-| Prompt | Use |
-| --- | --- |
-| `join-session` | Join a session and inspect peers / `lattice://session/{id}` |
-| `two-agent-handoff` | Same `session_id` on two harnesses or machines (Redis required) |
-| `pull-and-reply` | `pull_messages` then `tell_room` / `tell_agent` |
+```text
+list_peers
+```
 
-`session_id` arguments complete from the default session and the last join.
+and see both participants.
 
-## Environment
+Frontend can send:
 
-Agents **never** pass Redis passwords in tool arguments. Configure the MCP server process only.
+```text
+tell_agent
 
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `LATTICE_REDIS_URL` | if store=redis | — | `redis://user:pass@host:6379/0` (or `rediss://`). `REDIS_URL` also accepted |
-| `REDIS_HOST` | alternative | — | Used with `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL` |
-| `LATTICE_NAMESPACE` | no | `dev` | Key prefix namespace |
-| `LATTICE_DEFAULT_SESSION_ID` | no | — | Used when tools omit `session_id`; also listed as `lattice://session/{id}` |
-| `LATTICE_JOIN_TOKEN` | no | — | Shared secret; `join_session` must send matching `join_token` |
-| `LATTICE_STORE` | no | `redis` | `redis` \| `memory` (`memory` is **one process**) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | If unset, tracing is a no-op |
-| `OTEL_SERVICE_NAME` | no | `lattice-talk` | OTEL resource `service.name` |
-| `OTEL_EXPORTER_OTLP_HEADERS` | no | — | `k=v,k2=v2` or header-line / `k: v` form |
-| `LATTICE_PRESENCE_TTL` | no | `45` | Presence TTL (seconds) |
-| `LATTICE_STREAM_MAXLEN` | no | `1000` | Approx `XADD MAXLEN` |
+to_agent_id: backend
 
-## Identity and security
+body:
+"The checkout UI now expects
+POST /api/orders/checkout."
+```
 
-- After `join_session`, later tools use this process's identity. Passing another `agent_id` is not possible (`agent_id` is only on `join_session`).
-- Room send/read requires membership. `tell_agent` validates body and recipient **before** writing DM indexes.
-- `LATTICE_JOIN_TOKEN` is checked on join only (timing-safe compare). Hash stored at the session join key.
-- Redis credentials: **environment only**.
-- stdout is MCP JSON-RPC only. Logs (and OTEL) go to **stderr**.
-- Resource URIs validate `session_id` charset. Unknown URIs are JSON-RPC invalid params, not an empty `contents` array.
+Backend receives it using:
 
-## Two-machine demo
+```text
+pull_messages
 
-1. Redis reachable from both machines (`LATTICE_REDIS_URL` identical, including DB index).
-2. Same `LATTICE_NAMESPACE` on both MCP configs.
-3. Same optional `LATTICE_JOIN_TOKEN` if set.
-4. Same optional `OTEL_EXPORTER_OTLP_ENDPOINT` if you want one trace timeline.
-5. Agent A: `join_session` `session_id=demo-1` `role=frontend`.
-6. Agent B: `join_session` **same** `session_id=demo-1` `role=backend`.
-7. `list_peers` on either side shows both (online while presence TTL is fresh).
-8. A: `tell_room` body `hello from A`. B: `pull_messages` (after idle) sees it.
-9. A: `memory_set` `key=api.base` `value=https://api.dev`. B: `memory_get` returns the same value. Either side can read `lattice://session/demo-1/memory`.
-10. `trace_context` returns `conversation_id` equal to `session_id`.
+inbox: true
+```
 
-`LATTICE_STORE=memory` cannot cross processes. Two harnesses cannot share it.
+The backend can respond:
 
-## Redis keys
+```text
+tell_agent
 
-Prefix: `lattice:{ns}:...`. Every key includes `{session_id}` so a session maps to one cluster hash slot (e.g. `lattice:dev:session:{team-42}:meta`).
+to_agent_id: frontend
 
-| Key | Type | Purpose |
-| --- | --- | --- |
-| `lattice:{ns}:session:{sid}:meta` | Hash | created_at, created_by, namespace |
-| `lattice:{ns}:session:{sid}:agents` | Hash | agent records |
-| `lattice:{ns}:session:{sid}:presence:{agent_id}` | String + TTL | Online if key exists |
-| `lattice:{ns}:session:{sid}:rooms` | Set | Room ids |
-| `lattice:{ns}:session:{sid}:join` | String | SHA-256 of join token (optional) |
-| `lattice:{ns}:session:{sid}:dm_partners:{agent_id}` | Set | DM counterpart ids |
-| `lattice:{ns}:room:{sid}:{rid}:meta` | Hash | Room metadata |
-| `lattice:{ns}:room:{sid}:{rid}:members` | Set | Members |
-| `lattice:{ns}:stream:session:{sid}:room:{rid}` | Stream | Room messages (`XADD MAXLEN ~ 1000`) |
-| `lattice:{ns}:stream:session:{sid}:dm:{pair}` | Stream | DM pair stream |
-| `lattice:{ns}:cursor:{sid}:{agent_id}:{rid}` | String | Last-read stream id (`rid` is a room id or `dm:{pair}`) |
-| `lattice:{ns}:wake:{sid}` | Pub/Sub | Optional wakeup on new messages |
-| `lattice:{ns}:memory:{sid}:kv` | Hash | Shared facts |
-| `lattice:{ns}:memory:{sid}:notes` | Stream | Append-only notes |
-| `lattice:{ns}:memory:{sid}:meta:{key}` | Hash | Optional per-key memory metadata |
+body:
+"Endpoint is implemented.
+I'll store the response schema in shared memory."
+```
 
-Default room: **`main`** (created on join). Stream fields: `from`, `to?`, `role`, `harness`, `kind` (`chat` \| `status` \| `task` \| `system`), `body`, `ts`, `traceparent`. Presence is refreshed on join and pull.
+Then:
 
-## Protocol and packaging
+```text
+memory_set
 
-Feature-aligned with [MCP 2026-07-28](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) (tools / resources / prompts, annotations, `structuredContent`, stderr logging). **Wire = [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk) v1 / `initialize`** so Claude, Cursor, and Codex can connect. We do not speak `server/discover` or per-request `_meta` on the wire.
+key: checkout.response
+value: "{ order_id, payment_url, status }"
+```
 
-- Capabilities advertise `listChanged: false` on tools, resources, and prompts (listings are static; we do not emit `notifications/*/list_changed`).
-- No Streamable HTTP, OAuth, resource subscriptions, protocol `notifications/message`, MCP Apps, Tasks, or elicitation.
-- Completions exist only for `session_id` on prompts and resource templates.
-- npm package (when published) ships `dist/`, README, LICENSE, `package.json`. GitHub is source + tests. `prepublishOnly` runs `npm run build`.
+The frontend agent can retrieve it later:
 
-## Develop
+```text
+memory_get
+
+key: checkout.response
+```
+
+No copy-pasting between agents.
+
+---
+
+# MCP Tools
+
+Lattice currently exposes **14 tools**.
+
+## Sessions
+
+| Tool            | Description                     |
+| --------------- | ------------------------------- |
+| `join_session`  | Join a shared agent session     |
+| `leave_session` | Leave the current session       |
+| `list_peers`    | List agents and online presence |
+| `session_info`  | Get session information         |
+
+---
+
+## Messaging
+
+| Tool            | Description                     |
+| --------------- | ------------------------------- |
+| `tell_agent`    | Send a direct message           |
+| `tell_room`     | Broadcast to a room             |
+| `pull_messages` | Receive new room or DM messages |
+| `create_room`   | Create a new room               |
+| `join_room`     | Join an existing room           |
+
+---
+
+## Shared memory
+
+| Tool          | Description                      |
+| ------------- | -------------------------------- |
+| `memory_set`  | Store a shared value             |
+| `memory_get`  | Read a shared value              |
+| `memory_list` | List shared memory keys          |
+| `memory_note` | Append an immutable session note |
+
+---
+
+## Observability
+
+| Tool            | Description                                      |
+| --------------- | ------------------------------------------------ |
+| `trace_context` | Return trace and session correlation information |
+
+---
+
+# Agent identity
+
+After:
+
+```text
+join_session
+```
+
+the MCP process owns that agent identity.
+
+For example:
+
+```text
+agent_id = frontend
+```
+
+Later calls cannot impersonate another agent by supplying:
+
+```text
+agent_id = backend
+```
+
+Operations such as:
+
+```text
+tell_agent
+tell_room
+pull_messages
+memory_set
+memory_note
+create_room
+join_room
+leave_session
+```
+
+always use the identity owned by the current MCP process.
+
+This prevents one agent from:
+
+* sending messages as another agent
+* advancing another agent's message cursor
+* reading another agent's inbox
+* removing another agent from a session
+
+---
+
+# Presence
+
+Agent presence uses short-lived keys.
+
+By default:
+
+```text
+TTL = 45 seconds
+```
+
+Presence is refreshed when the agent:
+
+```text
+joins
+pulls messages
+```
+
+`list_peers` reports:
+
+```json
+{
+  "online": true
+}
+```
+
+while that presence key remains active.
+
+---
+
+# Rooms
+
+Every session automatically creates:
+
+```text
+main
+```
+
+Additional rooms can be created with:
+
+```text
+create_room
+```
+
+Agents must join a room before they can:
+
+```text
+tell_room
+pull_messages
+```
+
+for that room.
+
+---
+
+# Direct messages
+
+DMs are stored using a stream shared between each pair of agents.
+
+For:
+
+```text
+frontend
+backend
+```
+
+the pair identifier becomes:
+
+```text
+backend:frontend
+```
+
+The ordering is deterministic so both agents reference the same stream.
+
+Each receiving agent has its own cursor.
+
+This means reading messages does not consume them globally.
+
+---
+
+# Message cursors
+
+Lattice does not repeatedly return every message.
+
+Each agent keeps a cursor indicating the last message it has read.
+
+```text
+Agent A cursor → message 42
+Agent B cursor → message 18
+```
+
+Calling:
+
+```text
+pull_messages
+```
+
+returns messages after that agent's cursor and then advances it.
+
+---
+
+# Pagination
+
+Large lists are bounded so MCP responses stay manageable.
+
+### Peers
+
+```text
+list_peers
+
+cursor?
+limit?
+```
+
+Default:
+
+```text
+100
+```
+
+Maximum:
+
+```text
+200
+```
+
+### Memory
+
+```text
+memory_list
+
+cursor?
+limit?
+```
+
+Default:
+
+```text
+50
+```
+
+Maximum:
+
+```text
+200
+```
+
+---
+
+# Redis layout
+
+Lattice Redis keys begin with:
+
+```text
+lattice:{namespace}:...
+```
+
+Session IDs are placed inside Redis Cluster hash tags so data belonging to one session maps to the same cluster slot.
+
+Example:
+
+```text
+lattice:dev:session:{checkout-v2}:meta
+```
+
+Important keys include:
+
+```text
+session metadata
+agents
+presence
+rooms
+room membership
+room streams
+DM streams
+message cursors
+shared memory
+session notes
+```
+
+Example layout:
+
+```text
+lattice:{ns}:session:{sid}:meta
+
+lattice:{ns}:session:{sid}:agents
+
+lattice:{ns}:session:{sid}:presence:{agent_id}
+
+lattice:{ns}:session:{sid}:rooms
+
+lattice:{ns}:room:{sid}:{room_id}:members
+
+lattice:{ns}:stream:session:{sid}:room:{room_id}
+
+lattice:{ns}:stream:session:{sid}:dm:{pair}
+
+lattice:{ns}:cursor:{sid}:{agent_id}:{channel}
+
+lattice:{ns}:memory:{sid}:kv
+
+lattice:{ns}:memory:{sid}:notes
+```
+
+---
+
+# OpenTelemetry
+
+Set:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+and Lattice will export traces using OTLP.
+
+Important attributes include:
+
+```text
+gen_ai.conversation.id
+gen_ai.agent.name
+
+lattice.session_id
+lattice.agent_id
+lattice.harness
+lattice.room_id
+lattice.namespace
+```
+
+`session_id` is used as:
+
+```text
+gen_ai.conversation.id
+```
+
+so operations from different agents can be correlated under the same conversation.
+
+Outbound messages can also carry the current W3C:
+
+```text
+traceparent
+```
+
+---
+
+# Security model
+
+Lattice is intentionally small, but several protections are built in.
+
+### Redis credentials stay outside MCP tools
+
+Agents cannot send:
+
+```text
+REDIS_PASSWORD
+LATTICE_REDIS_URL
+```
+
+through tool arguments.
+
+Connection information comes only from the MCP process environment.
+
+---
+
+### Optional join token
+
+Set:
+
+```bash
+LATTICE_JOIN_TOKEN=some-secret
+```
+
+Agents must provide the matching token during:
+
+```text
+join_session
+```
+
+The token is compared using a timing-safe comparison.
+
+---
+
+### Process-owned identity
+
+After joining, the MCP process controls the agent identity.
+
+Other tool calls cannot impersonate another participant.
+
+---
+
+### Room membership
+
+Agents cannot read or write private rooms until they have joined them.
+
+---
+
+### stdout is reserved for MCP
+
+Lattice never writes application logs to stdout.
+
+```text
+stdout → MCP JSON-RPC
+stderr → logs
+```
+
+This is important because writing arbitrary logs to stdout would corrupt the MCP protocol stream.
+
+---
+
+# MCP resources
+
+Lattice also exposes small MCP resources.
+
+```text
+lattice://about
+```
+
+Returns information about the running server.
+
+```text
+lattice://session/{session_id}
+```
+
+Returns a compact session snapshot.
+
+```text
+lattice://session/{session_id}/memory
+```
+
+Returns shared memory metadata/keys.
+
+Lattice intentionally does not expose a filesystem-like resource system.
+
+---
+
+# MCP prompts
+
+Lattice includes helper prompts for common workflows:
+
+```text
+join-session
+two-agent-handoff
+pull-and-reply
+```
+
+These are convenience prompts for clients that support MCP prompts.
+
+---
+
+# Development
+
+Install:
 
 ```bash
 npm install
-npm run typecheck
-npm test          # MemoryStore + unit tests; Redis / two-process E2E skipped unless LATTICE_REDIS_URL is set
-npm run build
-npm start         # node dist/index.js
 ```
+
+Type-check:
 
 ```bash
-LATTICE_STORE=memory node dist/index.js
+npm run typecheck
 ```
 
-## License
+Run tests:
+
+```bash
+npm test
+```
+
+Build:
+
+```bash
+npm run build
+```
+
+Run:
+
+```bash
+npm start
+```
+
+---
+
+# Testing
+
+The repository includes tests for:
+
+* key generation
+* Redis stream cursors
+* memory store behavior
+* MCP schemas
+* MCP tools
+* resources
+* prompts
+* process-owned identity
+* room authorization
+* pagination
+* OpenTelemetry attributes
+* stdio behavior
+* Redis integration
+* multi-process Redis communication
+
+The CI pipeline runs:
+
+```text
+npm ci
+npm run typecheck
+npm run build
+npm test
+npm pack --dry-run
+```
+
+with Redis available during integration tests.
+
+---
+
+# Local testing without Redis
+
+For simple development:
+
+```bash
+LATTICE_STORE=memory npm start
+```
+
+This provides the same session/messaging APIs using in-process memory.
+
+Keep in mind:
+
+> The memory store is process-local.
+
+Two different Claude/Cursor/Codex processes need Redis to communicate.
+
+---
+
+# What Lattice is not
+
+Lattice v1 intentionally does **not** try to be:
+
+* a hosted collaboration platform
+* an AI database
+* Redis-as-MCP
+* an agent IDE
+* a workflow engine
+* an A2A replacement
+* a persistent tool-call archive
+* a central HTTP server
+
+The goal is deliberately narrower:
+
+> **Give independent AI agents a lightweight shared communication layer using MCP.**
+
+---
+
+# Project status
+
+Lattice currently focuses on the stdio MCP workflow used by coding-agent environments.
+
+The project uses the official MCP TypeScript SDK and currently stays on the SDK/wire generation compatible with existing stdio MCP hosts such as Claude Code, Cursor, and Codex.
+
+Possible future directions include:
+
+```text
+richer agent presence
+better task coordination
+additional transports
+optional local persistence
+improved observability
+session lifecycle controls
+```
+
+without turning Lattice into a large hosted platform.
+
+---
+
+# Contributing
+
+Issues, bug reports, integration examples, and improvements are welcome.
+
+Repository:
+
+https://github.com/d4rkNinja/lattice-talk
+
+Useful contributions include:
+
+* testing with additional MCP hosts
+* Redis edge-case testing
+* better multi-agent examples
+* documentation improvements
+* tracing integrations
+* security reviews
+
+---
+
+# License
 
 MIT
+
+---
+
+## The idea in one sentence
+
+**Lattice Talk lets AI agents running in different coding tools join one shared session and communicate without making you the message bus.**
