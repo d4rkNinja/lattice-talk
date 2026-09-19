@@ -2,8 +2,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { MemoryStore } from "../src/core/memory-store.js";
 import { memorySet } from "../src/core/memory.js";
+import { joinSession } from "../src/core/session.js";
+import { MCP_ALIGNMENT, MCP_WIRE_ERA } from "../src/mcp/protocol.js";
 import { ABOUT_RESOURCE_URI, MEMORY_URI_TEMPLATE, SESSION_URI_TEMPLATE } from "../src/mcp/uris.js";
 import { createMcpServer } from "../src/mcp/server.js";
 import { makeDeps, testConfig } from "./helpers.js";
@@ -16,6 +19,12 @@ describe("MCP resources and prompts", () => {
   beforeAll(async () => {
     store = new MemoryStore("primitives");
     const deps = makeDeps(store, testConfig({ LATTICE_DEFAULT_SESSION_ID: "demo-1" }));
+    await joinSession(deps, {
+      session_id: "demo-1",
+      role: "tester",
+      agent_id: "demo-agent",
+      harness: "vitest",
+    });
     await memorySet(deps, { session_id: "demo-1", key: "api.base", value: "https://api.dev" });
     server = createMcpServer(deps);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -49,10 +58,14 @@ describe("MCP resources and prompts", () => {
       name: string;
       transport: string;
       spec: string;
+      wire: string;
+      alignment: string;
     };
     expect(body.name).toBe("lattice-talk");
     expect(body.transport).toBe("stdio");
     expect(body.spec).toBe("2026-07-28");
+    expect(body.wire).toBe(MCP_WIRE_ERA);
+    expect(body.alignment).toBe(MCP_ALIGNMENT);
     expect(text).not.toMatch(/password|redis:\/\//i);
   });
 
@@ -74,6 +87,46 @@ describe("MCP resources and prompts", () => {
   it("rejects unknown and invalid resource URIs", async () => {
     await expect(client.readResource({ uri: "lattice://nope" })).rejects.toThrow();
     await expect(client.readResource({ uri: "lattice://session/!!bad!!" })).rejects.toThrow();
+  });
+
+  it("returns JSON-RPC -32602 for an unknown session id (does not invent empty success)", async () => {
+    await expect(
+      client.readResource({ uri: "lattice://session/does-not-exist-xyz" }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.InvalidParams,
+    });
+    await expect(
+      client.readResource({ uri: "lattice://session/does-not-exist-xyz/memory" }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.InvalidParams,
+    });
+  });
+
+  it("reads a joined empty-ish session snapshot and memory key list", async () => {
+    const joined = await client.callTool({
+      name: "join_session",
+      arguments: { session_id: "empty-ish", role: "tester", harness: "vitest" },
+    });
+    expect(joined.isError).toBeFalsy();
+
+    const session = await client.readResource({ uri: "lattice://session/empty-ish" });
+    const sessionText =
+      session.contents[0] && "text" in session.contents[0] ? session.contents[0].text : "";
+    const sessionBody = JSON.parse(sessionText ?? "") as {
+      session_id: string;
+      peer_count: number;
+      rooms: string[];
+    };
+    expect(sessionBody.session_id).toBe("empty-ish");
+    expect(sessionBody.peer_count).toBeGreaterThanOrEqual(1);
+    expect(sessionBody.rooms).toContain("main");
+
+    const memory = await client.readResource({ uri: "lattice://session/empty-ish/memory" });
+    const memoryText =
+      memory.contents[0] && "text" in memory.contents[0] ? memory.contents[0].text : "";
+    const memoryBody = JSON.parse(memoryText ?? "") as { session_id: string; keys: string[] };
+    expect(memoryBody.session_id).toBe("empty-ish");
+    expect(memoryBody.keys).toEqual([]);
   });
 
   it("lists and gets user-controlled prompts without secret args", async () => {

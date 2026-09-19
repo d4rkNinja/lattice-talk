@@ -5,7 +5,7 @@ import { currentTraceparent } from "../../otel/setup.js";
 import { readOnly } from "../annotations.js";
 import { toolOk } from "../result.js";
 import { runTool } from "../run.js";
-import { traceContextSchema } from "../schemas.js";
+import { traceContextOutputSchema, traceContextSchema } from "../schemas.js";
 
 export function registerObservabilityTools(server: McpServer, deps: BusDeps): void {
   server.registerTool(
@@ -14,6 +14,7 @@ export function registerObservabilityTools(server: McpServer, deps: BusDeps): vo
       description:
         "Return session_id, conversation_id (same as session_id / gen_ai.conversation.id), current W3C traceparent, and namespace for log correlation.",
       inputSchema: traceContextSchema,
+      outputSchema: traceContextOutputSchema,
       annotations: readOnly("Trace context"),
     },
     async (args) =>

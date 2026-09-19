@@ -6,10 +6,15 @@ import { write } from "../annotations.js";
 import { toolOk } from "../result.js";
 import { runTool } from "../run.js";
 import {
+  createRoomOutputSchema,
   createRoomSchema,
+  joinRoomOutputSchema,
   joinRoomSchema,
+  pullMessagesOutputSchema,
   pullMessagesSchema,
+  tellAgentOutputSchema,
   tellAgentSchema,
+  tellRoomOutputSchema,
   tellRoomSchema,
 } from "../schemas.js";
 
@@ -20,6 +25,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       description:
         "Send a DM to another agent in this session. Stored on the sorted pair stream (a:b). The recipient reads it with pull_messages inbox=true.",
       inputSchema: tellAgentSchema,
+      outputSchema: tellAgentOutputSchema,
       annotations: write("Tell agent"),
     },
     async (args) =>
@@ -37,6 +43,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       description:
         "Broadcast a message to a session room (default main). Other agents see it on pull_messages after idle.",
       inputSchema: tellRoomSchema,
+      outputSchema: tellRoomOutputSchema,
       annotations: write("Tell room"),
     },
     async (args) =>
@@ -59,6 +66,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       description:
         "Read new messages since this agent's cursor, then advance the cursor and refresh presence. Pass room_id for a room, or inbox=true (optionally other_agent_id) for DMs. Bodies longer than ~2k chars are truncated.",
       inputSchema: pullMessagesSchema,
+      outputSchema: pullMessagesOutputSchema,
       annotations: write("Pull messages"),
     },
     async (args) =>
@@ -75,6 +83,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     {
       description: "Create a named room in the session and add the caller as a member.",
       inputSchema: createRoomSchema,
+      outputSchema: createRoomOutputSchema,
       annotations: write("Create room"),
     },
     async (args) =>
@@ -91,6 +100,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     {
       description: "Join an existing room's membership set.",
       inputSchema: joinRoomSchema,
+      outputSchema: joinRoomOutputSchema,
       annotations: write("Join room", { idempotentHint: true }),
     },
     async (args) =>

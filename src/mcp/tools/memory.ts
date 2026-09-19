@@ -5,9 +5,13 @@ import { readOnly, write } from "../annotations.js";
 import { toolOk } from "../result.js";
 import { runTool } from "../run.js";
 import {
+  memoryGetOutputSchema,
   memoryGetSchema,
+  memoryListOutputSchema,
   memoryListSchema,
+  memoryNoteOutputSchema,
   memoryNoteSchema,
+  memorySetOutputSchema,
   memorySetSchema,
 } from "../schemas.js";
 
@@ -18,6 +22,7 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
       description:
         "Set a shared session fact (key/value). Use for decisions and pointers — not raw tool-call dumps. Visible to every agent in the session.",
       inputSchema: memorySetSchema,
+      outputSchema: memorySetOutputSchema,
       annotations: write("Set memory", { idempotentHint: true }),
     },
     async (args) =>
@@ -34,6 +39,7 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
     {
       description: "Read a shared session memory key.",
       inputSchema: memoryGetSchema,
+      outputSchema: memoryGetOutputSchema,
       annotations: readOnly("Get memory"),
     },
     async (args) =>
@@ -47,6 +53,7 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
     {
       description: "List shared memory keys. Set include_values for short previews.",
       inputSchema: memoryListSchema,
+      outputSchema: memoryListOutputSchema,
       annotations: readOnly("List memory"),
     },
     async (args) =>
@@ -60,6 +67,7 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
     {
       description: "Append an immutable note to the session notes stream.",
       inputSchema: memoryNoteSchema,
+      outputSchema: memoryNoteOutputSchema,
       annotations: write("Append memory note"),
     },
     async (args) =>

@@ -6,7 +6,15 @@ import { memoryList } from "../core/memory.js";
 import { sessionInfo } from "../core/session.js";
 import type { BusDeps } from "../core/types.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../version.js";
-import { MCP_INTRO_URL, MCP_SPEC_DATE, MCP_SPEC_URL, MCP_TS_SDK_PACKAGE } from "./protocol.js";
+import {
+  MCP_ALIGNMENT,
+  MCP_DOCS_HUB_URL,
+  MCP_FEATURE_SPEC_DATE,
+  MCP_INTRO_URL,
+  MCP_SPEC_URL,
+  MCP_TS_SDK_PACKAGE,
+  MCP_WIRE_ERA,
+} from "./protocol.js";
 import {
   ABOUT_RESOURCE_URI,
   MEMORY_URI_TEMPLATE,
@@ -29,11 +37,25 @@ function jsonContents(uri: string, data: unknown) {
 }
 
 function throwResourceError(err: unknown, uri: string): never {
+  if (err instanceof McpError) {
+    throw err;
+  }
   if (isUserError(err)) {
     throw new McpError(ErrorCode.InvalidParams, err.message, { uri });
   }
   const message = err instanceof Error ? err.message : String(err);
   throw new McpError(ErrorCode.InternalError, message, { uri });
+}
+
+function throwResourceNotFound(uri: string): never {
+  throw new McpError(ErrorCode.InvalidParams, "Resource not found", { uri });
+}
+
+async function requireExistingSession(deps: BusDeps, sessionId: string, uri: string): Promise<void> {
+  const meta = await deps.store.getSessionMeta(sessionId);
+  if (!meta) {
+    throwResourceNotFound(uri);
+  }
 }
 
 function parseSessionId(raw: unknown, uri: string): string {
@@ -81,7 +103,7 @@ function listedDefaultMemory(deps: BusDeps) {
  * Official MCP resources: one static identity doc + two URI templates.
  * Not a filesystem server. List contents come from process env (default
  * session), not from join_session, so they do not vary as a side effect
- * of other requests (2026-07-28 resources/list rule).
+ * of other requests (feature-aligned 2026-07-28 resources/list rule).
  */
 export function registerResources(server: McpServer, deps: BusDeps): void {
   server.registerResource(
@@ -90,7 +112,7 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     {
       title: "Lattice about",
       description:
-        "Server identity, MCP 2026-07-28 primitives, and how to use this stdio session bus. No secrets.",
+        "Server identity, feature-aligned 2026-07-28 primitives, SDK v1 / initialize wire. No secrets.",
       mimeType: "application/json",
     },
     async (uri) =>
@@ -99,9 +121,12 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
         version: PACKAGE_VERSION,
         product: "Lattice",
         transport: "stdio",
-        spec: MCP_SPEC_DATE,
+        spec: MCP_FEATURE_SPEC_DATE,
+        wire: MCP_WIRE_ERA,
+        alignment: MCP_ALIGNMENT,
         spec_url: MCP_SPEC_URL,
-        docs: MCP_INTRO_URL,
+        docs: MCP_DOCS_HUB_URL,
+        docs_feature: MCP_INTRO_URL,
         sdk: MCP_TS_SDK_PACKAGE,
         primitives: ["tools", "resources", "prompts"],
         store: deps.store.kind,
@@ -134,6 +159,7 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
+        await requireExistingSession(deps, sessionId, uri.href);
         return jsonContents(uri.href, await sessionInfo(deps, { session_id: sessionId }));
       } catch (err) {
         throwResourceError(err, uri.href);
@@ -158,6 +184,7 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
+        await requireExistingSession(deps, sessionId, uri.href);
         return jsonContents(
           uri.href,
           await memoryList(deps, { session_id: sessionId, include_values: false }),

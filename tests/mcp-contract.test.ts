@@ -90,6 +90,7 @@ describe("Claude Code MCP contract", () => {
       }
 
       expect(tool.annotations, tool.name).toBeTruthy();
+      expect(tool.annotations?.openWorldHint, tool.name).toBe(false);
       if (READ_ONLY.has(tool.name)) {
         expect(tool.annotations?.readOnlyHint, tool.name).toBe(true);
       } else {
@@ -98,7 +99,21 @@ describe("Claude Code MCP contract", () => {
       if (DESTRUCTIVE.has(tool.name)) {
         expect(tool.annotations?.destructiveHint, tool.name).toBe(true);
       }
+
+      const output = tool.outputSchema as Record<string, unknown> | undefined;
+      expect(output, tool.name).toBeTruthy();
+      expect(output?.type, tool.name).toBe("object");
+      expect(output?.anyOf, tool.name).toBeUndefined();
+      expect(output?.oneOf, tool.name).toBeUndefined();
+      expect(output?.allOf, tool.name).toBeUndefined();
     }
+  });
+
+  it("advertises listChanged false because this server never emits list_changed notifications", () => {
+    const caps = client.getServerCapabilities();
+    expect(caps?.tools?.listChanged).toBeFalsy();
+    expect(caps?.resources?.listChanged).toBeFalsy();
+    expect(caps?.prompts?.listChanged).toBeFalsy();
   });
 
   it("returns tool errors instead of crashing on bad input", async () => {
@@ -109,7 +124,8 @@ describe("Claude Code MCP contract", () => {
     expect(result.isError).toBe(true);
     const text = (result.content as { type: string; text?: string }[])[0]?.text ?? "";
     expect(text).toMatch(/role/i);
-    expect(result.structuredContent).toMatchObject({ error: expect.stringMatching(/role/i) });
+    const parsed = JSON.parse(text) as { error: string };
+    expect(parsed.error).toMatch(/role/i);
   });
 
   it("returns structuredContent alongside text JSON on success", async () => {

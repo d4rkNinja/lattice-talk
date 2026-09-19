@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { BusDeps } from "../core/types.js";
 import { PACKAGE_NAME } from "../version.js";
-import { MCP_SPEC_DATE } from "./protocol.js";
+import { MCP_ALIGNMENT } from "./protocol.js";
 import { memoryResourceUri, sessionResourceUri, suggestSessionIds } from "./uris.js";
 
 function sessionIdArg(deps: BusDeps) {
@@ -43,7 +43,7 @@ export function registerPrompts(server: McpServer, deps: BusDeps): void {
             content: {
               type: "text",
               text: [
-                `You are connected to Lattice (npm package ${PACKAGE_NAME}), a local stdio MCP session bus written against MCP ${MCP_SPEC_DATE}.`,
+                `You are connected to Lattice (npm package ${PACKAGE_NAME}), a local stdio MCP session bus (${MCP_ALIGNMENT}).`,
                 `1. Call join_session with session_id=${sid} and role=${agentRole}. Do not pass Redis passwords or URLs as tool arguments; they live in the MCP process env.`,
                 `2. Call list_peers, or read resource ${sessionResourceUri(sid)} for a compact snapshot.`,
                 "3. After idle, pull_messages (room main and/or inbox=true). Share short facts with memory_set, not raw tool dumps.",

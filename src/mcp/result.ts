@@ -3,9 +3,11 @@ import { isUserError } from "../core/errors.js";
 import { log } from "../log.js";
 
 /**
- * MCP 2026-07-28 tool results: text content for clients that only read
- * `content`, plus `structuredContent` (same JSON). Errors use isError so
- * the model can retry; they are not JSON-RPC protocol failures.
+ * Feature-aligned tool results (2026-07-28 docs): text `content` for clients
+ * that only read that field, plus `structuredContent` (same JSON) matching
+ * each tool's published `outputSchema`. Errors use isError so the model can
+ * retry; they are not JSON-RPC protocol failures. Wire handshake is still
+ * SDK v1 / initialize.
  */
 function asStructured(data: unknown): Record<string, unknown> | undefined {
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
@@ -27,7 +29,8 @@ export function toolErr(message: string, extra?: Record<string, unknown>): CallT
   const payload = { error: message, ...extra };
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
-    structuredContent: payload,
+    // SDK v1 client validates structuredContent against outputSchema even on
+    // isError. Omit it so execution errors stay tool results, not -32602.
     isError: true,
   };
 }

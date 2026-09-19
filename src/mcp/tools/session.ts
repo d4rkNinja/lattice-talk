@@ -10,9 +10,13 @@ import { destructive, readOnly, write } from "../annotations.js";
 import { toolOk } from "../result.js";
 import { runTool } from "../run.js";
 import {
+  joinSessionOutputSchema,
   joinSessionSchema,
+  leaveSessionOutputSchema,
   leaveSessionSchema,
+  listPeersOutputSchema,
   listPeersSchema,
+  sessionInfoOutputSchema,
   sessionInfoSchema,
 } from "../schemas.js";
 
@@ -23,6 +27,7 @@ export function registerSessionTools(server: McpServer, deps: BusDeps): void {
       description:
         "Join a Lattice session: register this agent, ensure the main room, start presence, and return peers. Same session_id + Redis = same bus across harnesses and machines.",
       inputSchema: joinSessionSchema,
+      outputSchema: joinSessionOutputSchema,
       annotations: write("Join session", { idempotentHint: true }),
     },
     async (args) =>
@@ -45,6 +50,7 @@ export function registerSessionTools(server: McpServer, deps: BusDeps): void {
     {
       description: "Leave the Lattice session and clear this agent's presence key.",
       inputSchema: leaveSessionSchema,
+      outputSchema: leaveSessionOutputSchema,
       annotations: destructive("Leave session"),
     },
     async (args) =>
@@ -62,6 +68,7 @@ export function registerSessionTools(server: McpServer, deps: BusDeps): void {
       description:
         "List agents in the session. online is true when the presence key is still alive (TTL ~45s, refreshed on join and pull).",
       inputSchema: listPeersSchema,
+      outputSchema: listPeersOutputSchema,
       annotations: readOnly("List peers"),
     },
     async (args) =>
@@ -76,6 +83,7 @@ export function registerSessionTools(server: McpServer, deps: BusDeps): void {
       description:
         "Debug snapshot: session_id, namespace, store kind, peer count, and rooms.",
       inputSchema: sessionInfoSchema,
+      outputSchema: sessionInfoOutputSchema,
       annotations: readOnly("Session info"),
     },
     async (args) =>

@@ -61,9 +61,10 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function outboundFields(
+async function outboundFields(
   deps: BusDeps,
   input: {
+    sessionId: string;
     from: string;
     to?: string;
     body: string;
@@ -71,17 +72,18 @@ function outboundFields(
     role?: string;
     harness?: string;
   },
-): Record<string, string> {
+): Promise<Record<string, string>> {
   if (!input.body) {
     throw new UserError("body is required.");
   }
   if (input.body.length > MESSAGE_BODY_MAX_CHARS) {
     throw new UserError(`body must be at most ${MESSAGE_BODY_MAX_CHARS} characters.`);
   }
+  const stored = await deps.store.getAgent(input.sessionId, input.from);
   const fields: Record<string, string> = {
     from: input.from,
-    role: input.role || deps.ctx.role || "agent",
-    harness: input.harness || deps.ctx.harness || "unknown",
+    role: input.role || stored?.role || deps.ctx.role || "agent",
+    harness: input.harness || stored?.harness || deps.ctx.harness || "unknown",
     kind: parseKind(input.kind),
     body: input.body,
     ts: nowIso(),
@@ -111,7 +113,8 @@ export async function tellRoom(
   if (!meta) {
     throw new UserError(`Room ${roomId} does not exist. Create it with create_room first.`);
   }
-  const fields = outboundFields(deps, {
+  const fields = await outboundFields(deps, {
+    sessionId,
     from: agentId,
     body: input.body,
     kind: input.kind,
@@ -152,7 +155,8 @@ export async function tellAgent(
   const pair = dmPair(from, to);
   await deps.store.addDmPartner(sessionId, from, to);
   await deps.store.addDmPartner(sessionId, to, from);
-  const fields = outboundFields(deps, {
+  const fields = await outboundFields(deps, {
+    sessionId,
     from,
     to,
     body: input.body,

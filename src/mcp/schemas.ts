@@ -130,6 +130,141 @@ export const traceContextSchema = {
   session_id: z.string().optional().describe("Session / conversation id override."),
 };
 
+const peerOutput = z.object({
+  agent_id: z.string(),
+  role: z.string(),
+  harness: z.string(),
+  display_name: z.string(),
+  joined_at: z.string(),
+  online: z.boolean(),
+});
+
+const messageOutput = z.object({
+  id: z.string(),
+  from: z.string(),
+  to: z.string().optional(),
+  role: z.string(),
+  harness: z.string(),
+  kind: z.enum(["chat", "status", "task", "system"]),
+  body: z.string(),
+  ts: z.string(),
+  traceparent: z.string().optional(),
+  truncated: z.boolean().optional(),
+});
+
+export const joinSessionOutputSchema = {
+  session_id: z.string(),
+  agent_id: z.string(),
+  namespace: z.string(),
+  room_id: z.string(),
+  peers: z.array(peerOutput),
+  created: z.boolean(),
+};
+
+export const leaveSessionOutputSchema = {
+  left: z.boolean(),
+  session_id: z.string(),
+  agent_id: z.string(),
+};
+
+export const listPeersOutputSchema = {
+  session_id: z.string(),
+  peers: z.array(peerOutput),
+  peer_count: z.number(),
+  online_count: z.number(),
+};
+
+export const sessionInfoOutputSchema = {
+  session_id: z.string(),
+  namespace: z.string(),
+  store: z.string(),
+  peer_count: z.number(),
+  rooms: z.array(z.string()),
+  created_at: z.string().optional(),
+  created_by: z.string().optional(),
+};
+
+export const tellAgentOutputSchema = {
+  message_id: z.string(),
+  pair: z.string(),
+  session_id: z.string(),
+};
+
+export const tellRoomOutputSchema = {
+  message_id: z.string(),
+  room_id: z.string(),
+  session_id: z.string(),
+};
+
+export const pullMessagesOutputSchema = {
+  session_id: z.string(),
+  channel: z.string(),
+  messages: z.array(messageOutput),
+  next_cursor: z.string().optional(),
+  cursors: z.record(z.string()).optional(),
+  truncated: z.boolean(),
+};
+
+export const createRoomOutputSchema = {
+  room_id: z.string(),
+  created: z.boolean(),
+  session_id: z.string(),
+};
+
+export const joinRoomOutputSchema = {
+  room_id: z.string(),
+  members: z.number(),
+  session_id: z.string(),
+};
+
+export const memorySetOutputSchema = {
+  key: z.string(),
+  session_id: z.string(),
+};
+
+export const memoryGetOutputSchema = {
+  key: z.string(),
+  value: z.string().nullable(),
+  found: z.boolean(),
+  session_id: z.string(),
+};
+
+export const memoryListOutputSchema = {
+  session_id: z.string(),
+  keys: z.array(z.string()),
+  values: z.record(z.string()).optional(),
+  truncated: z.boolean(),
+};
+
+export const memoryNoteOutputSchema = {
+  note_id: z.string(),
+  session_id: z.string(),
+};
+
+export const traceContextOutputSchema = {
+  session_id: z.string(),
+  conversation_id: z.string(),
+  traceparent: z.string().nullable(),
+  namespace: z.string(),
+};
+
+export const ALL_TOOL_OUTPUT_SCHEMAS = {
+  join_session: joinSessionOutputSchema,
+  leave_session: leaveSessionOutputSchema,
+  list_peers: listPeersOutputSchema,
+  session_info: sessionInfoOutputSchema,
+  tell_agent: tellAgentOutputSchema,
+  tell_room: tellRoomOutputSchema,
+  pull_messages: pullMessagesOutputSchema,
+  create_room: createRoomOutputSchema,
+  join_room: joinRoomOutputSchema,
+  memory_set: memorySetOutputSchema,
+  memory_get: memoryGetOutputSchema,
+  memory_list: memoryListOutputSchema,
+  memory_note: memoryNoteOutputSchema,
+  trace_context: traceContextOutputSchema,
+} as const;
+
 export const ALL_TOOL_SCHEMAS = {
   join_session: joinSessionSchema,
   leave_session: leaveSessionSchema,

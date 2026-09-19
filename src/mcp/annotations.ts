@@ -1,16 +1,21 @@
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 
 /**
- * MCP 2026-07-28 tool annotations (title, readOnlyHint, destructiveHint,
- * openWorldHint, idempotentHint). Clients treat these as untrusted hints.
- * Claude Code uses readOnlyHint to batch read-only calls.
+ * Tool annotations (title, readOnlyHint, destructiveHint, openWorldHint,
+ * idempotentHint). Clients treat these as untrusted hints.
+ *
+ * openWorldHint: true only if the tool talks to an unbounded world outside
+ * Lattice (e.g. web search). Spec example: a memory tool is closed.
+ * Lattice tools stay inside this process + the configured store — default false.
  */
+const CLOSED_WORLD = { openWorldHint: false } as const;
+
 export function readOnly(title: string): ToolAnnotations {
   return {
     title,
     readOnlyHint: true,
     destructiveHint: false,
-    openWorldHint: true,
+    ...CLOSED_WORLD,
   };
 }
 
@@ -19,8 +24,9 @@ export function write(title: string, extra?: Partial<ToolAnnotations>): ToolAnno
     title,
     readOnlyHint: false,
     destructiveHint: false,
-    openWorldHint: true,
+    ...CLOSED_WORLD,
     ...extra,
+    openWorldHint: extra?.openWorldHint ?? false,
   };
 }
 
@@ -29,6 +35,6 @@ export function destructive(title: string): ToolAnnotations {
     title,
     readOnlyHint: false,
     destructiveHint: true,
-    openWorldHint: true,
+    ...CLOSED_WORLD,
   };
 }

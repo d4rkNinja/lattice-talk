@@ -5,6 +5,7 @@ import {
   SERVER_INSTRUCTIONS,
 } from "../src/mcp/instructions.js";
 import {
+  ALL_TOOL_OUTPUT_SCHEMAS,
   ALL_TOOL_SCHEMAS,
   schemaHasSecretFields,
   schemaPropertyNameIssues,
@@ -35,6 +36,13 @@ describe("tool schemas", () => {
       expect(shape && typeof shape === "object", name).toBe(true);
       expect(schemaHasSecretFields(shape), name).toEqual([]);
       expect(schemaPropertyNameIssues(shape), name).toEqual([]);
+      expect("anyOf" in shape || "oneOf" in shape || "allOf" in shape, name).toBe(false);
+    }
+
+    expect(Object.keys(ALL_TOOL_OUTPUT_SCHEMAS)).toEqual(names);
+    for (const [name, shape] of Object.entries(ALL_TOOL_OUTPUT_SCHEMAS)) {
+      expect(Array.isArray(shape), name).toBe(false);
+      expect(shape && typeof shape === "object", name).toBe(true);
       expect("anyOf" in shape || "oneOf" in shape || "allOf" in shape, name).toBe(false);
     }
   });

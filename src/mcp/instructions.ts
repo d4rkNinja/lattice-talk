@@ -1,3 +1,5 @@
+import { MCP_ALIGNMENT } from "./protocol.js";
+
 /**
  * Claude Code loads server instructions at session start (tool search).
  * Keep this under 2KB and put the “when to use us” line first.
@@ -9,6 +11,7 @@ export const SERVER_INSTRUCTIONS = [
   "pull_messages paginates (default 50, max 200) and truncates bodies over ~2k characters so results stay under Claude Code’s MCP output limits (warn at 10k tokens, default cap 25k).",
   "Read lattice://about or lattice://session/{session_id} for compact session/memory context. User prompts: join-session, two-agent-handoff, pull-and-reply.",
   "LATTICE_STORE=memory is single-process only. Cross-harness and cross-machine require Redis.",
+  MCP_ALIGNMENT.charAt(0).toUpperCase() + MCP_ALIGNMENT.slice(1) + ".",
 ].join(" ");
 
 export const CLAUDE_CODE_INSTRUCTION_LIMIT_CHARS = 2048;

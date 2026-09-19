@@ -8,6 +8,7 @@ import { log } from "../log.js";
 import { installOtelStderrLogger, setupOtel, type OtelHandle } from "../otel/setup.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../version.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
+import { STATIC_LIST_CAPABILITIES } from "./protocol.js";
 import { registerPrompts } from "./prompts.js";
 import { registerResources } from "./resources.js";
 import { registerMemoryTools } from "./tools/memory.js";
@@ -23,6 +24,9 @@ export function createMcpServer(deps: BusDeps): McpServer {
     },
     {
       instructions: SERVER_INSTRUCTIONS,
+      // Constructor accepts ServerCapabilities. registerTool/Resource/Prompt
+      // still default listChanged:true; we re-apply false after registration.
+      capabilities: STATIC_LIST_CAPABILITIES,
     },
   );
   registerSessionTools(server, deps);
@@ -31,6 +35,7 @@ export function createMcpServer(deps: BusDeps): McpServer {
   registerObservabilityTools(server, deps);
   registerResources(server, deps);
   registerPrompts(server, deps);
+  server.server.registerCapabilities(STATIC_LIST_CAPABILITIES);
   return server;
 }
 
@@ -79,7 +84,7 @@ export async function startServer(): Promise<void> {
   process.on("SIGTERM", () => {
     void shutdown("SIGTERM");
   });
-  // MCP 2026-07-28 stdio: stdin EOF is the portable graceful-shutdown signal.
+  // stdio: stdin EOF is the portable graceful-shutdown signal (legacy initialize and 2026-07-28 alike).
   process.stdin.on("end", () => {
     void shutdown("stdin-eof");
   });

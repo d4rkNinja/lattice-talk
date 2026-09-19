@@ -43029,24 +43029,35 @@ var PACKAGE_VERSION = "1.0.0";
 
 // src/mcp/instructions.ts
 init_esm_shims();
+
+// src/mcp/protocol.ts
+init_esm_shims();
+var MCP_FEATURE_SPEC_DATE = "2026-07-28";
+var MCP_WIRE_ERA = "sdk-v1-initialize";
+var MCP_ALIGNMENT = "feature-aligned with 2026-07-28; wire = SDK v1 / initialize for today\u2019s Claude/Cursor/Codex";
+var MCP_DOCS_HUB_URL = "https://modelcontextprotocol.io/docs";
+var MCP_INTRO_URL = "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro";
+var MCP_SPEC_URL = "https://modelcontextprotocol.io/specification/2026-07-28";
+var MCP_TS_SDK_PACKAGE = "@modelcontextprotocol/sdk";
+var STATIC_LIST_CAPABILITIES = {
+  tools: { listChanged: false },
+  resources: { listChanged: false },
+  prompts: { listChanged: false }
+};
+
+// src/mcp/instructions.ts
 var SERVER_INSTRUCTIONS = [
   "Lattice (package lattice-talk) is a local stdio MCP session bus for agents in Claude Code, Cursor, Codex, and custom harnesses.",
   "Search these tools when multiple agents must share one session_id: join the session, DM or room-chat, pull new messages, and store short shared facts.",
   "Always join_session first (same session_id + Redis URL + namespace = the same bus across machines). Redis credentials and LATTICE_JOIN_TOKEN live in MCP env, never as Redis-password tool arguments.",
   "pull_messages paginates (default 50, max 200) and truncates bodies over ~2k characters so results stay under Claude Code\u2019s MCP output limits (warn at 10k tokens, default cap 25k).",
   "Read lattice://about or lattice://session/{session_id} for compact session/memory context. User prompts: join-session, two-agent-handoff, pull-and-reply.",
-  "LATTICE_STORE=memory is single-process only. Cross-harness and cross-machine require Redis."
+  "LATTICE_STORE=memory is single-process only. Cross-harness and cross-machine require Redis.",
+  MCP_ALIGNMENT.charAt(0).toUpperCase() + MCP_ALIGNMENT.slice(1) + "."
 ].join(" ");
 
 // src/mcp/prompts.ts
 init_esm_shims();
-
-// src/mcp/protocol.ts
-init_esm_shims();
-var MCP_SPEC_DATE = "2026-07-28";
-var MCP_INTRO_URL = "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro";
-var MCP_SPEC_URL = "https://modelcontextprotocol.io/specification/2026-07-28";
-var MCP_TS_SDK_PACKAGE = "@modelcontextprotocol/sdk";
 
 // src/mcp/uris.ts
 init_esm_shims();
@@ -43101,7 +43112,7 @@ function registerPrompts(server, deps) {
             content: {
               type: "text",
               text: [
-                `You are connected to Lattice (npm package ${PACKAGE_NAME}), a local stdio MCP session bus written against MCP ${MCP_SPEC_DATE}.`,
+                `You are connected to Lattice (npm package ${PACKAGE_NAME}), a local stdio MCP session bus (${MCP_ALIGNMENT}).`,
                 `1. Call join_session with session_id=${sid} and role=${agentRole}. Do not pass Redis passwords or URLs as tool arguments; they live in the MCP process env.`,
                 `2. Call list_peers, or read resource ${sessionResourceUri(sid)} for a compact snapshot.`,
                 "3. After idle, pull_messages (room main and/or inbox=true). Share short facts with memory_set, not raw tool dumps.",
@@ -43298,17 +43309,18 @@ function parseStreamMessage(entry) {
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
-function outboundFields(deps, input) {
+async function outboundFields(deps, input) {
   if (!input.body) {
     throw new UserError("body is required.");
   }
   if (input.body.length > MESSAGE_BODY_MAX_CHARS) {
     throw new UserError(`body must be at most ${MESSAGE_BODY_MAX_CHARS} characters.`);
   }
+  const stored = await deps.store.getAgent(input.sessionId, input.from);
   const fields = {
     from: input.from,
-    role: input.role || deps.ctx.role || "agent",
-    harness: input.harness || deps.ctx.harness || "unknown",
+    role: input.role || stored?.role || deps.ctx.role || "agent",
+    harness: input.harness || stored?.harness || deps.ctx.harness || "unknown",
     kind: parseKind(input.kind),
     body: input.body,
     ts: nowIso()
@@ -43326,7 +43338,8 @@ async function tellRoom(deps, input) {
   if (!meta) {
     throw new UserError(`Room ${roomId} does not exist. Create it with create_room first.`);
   }
-  const fields = outboundFields(deps, {
+  const fields = await outboundFields(deps, {
+    sessionId,
     from: agentId,
     body: input.body,
     kind: input.kind,
@@ -43355,7 +43368,8 @@ async function tellAgent(deps, input) {
   const pair = dmPair(from, to);
   await deps.store.addDmPartner(sessionId, from, to);
   await deps.store.addDmPartner(sessionId, to, from);
-  const fields = outboundFields(deps, {
+  const fields = await outboundFields(deps, {
+    sessionId,
     from,
     to,
     body: input.body,
@@ -43699,11 +43713,23 @@ function jsonContents(uri, data) {
   };
 }
 function throwResourceError(err, uri) {
+  if (err instanceof McpError) {
+    throw err;
+  }
   if (isUserError(err)) {
     throw new McpError(ErrorCode.InvalidParams, err.message, { uri });
   }
   const message = err instanceof Error ? err.message : String(err);
   throw new McpError(ErrorCode.InternalError, message, { uri });
+}
+function throwResourceNotFound(uri) {
+  throw new McpError(ErrorCode.InvalidParams, "Resource not found", { uri });
+}
+async function requireExistingSession(deps, sessionId, uri) {
+  const meta = await deps.store.getSessionMeta(sessionId);
+  if (!meta) {
+    throwResourceNotFound(uri);
+  }
 }
 function parseSessionId(raw, uri) {
   const value = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : "";
@@ -43749,7 +43775,7 @@ function registerResources(server, deps) {
     ABOUT_RESOURCE_URI,
     {
       title: "Lattice about",
-      description: "Server identity, MCP 2026-07-28 primitives, and how to use this stdio session bus. No secrets.",
+      description: "Server identity, feature-aligned 2026-07-28 primitives, SDK v1 / initialize wire. No secrets.",
       mimeType: "application/json"
     },
     async (uri) => jsonContents(uri.href, {
@@ -43757,9 +43783,12 @@ function registerResources(server, deps) {
       version: PACKAGE_VERSION,
       product: "Lattice",
       transport: "stdio",
-      spec: MCP_SPEC_DATE,
+      spec: MCP_FEATURE_SPEC_DATE,
+      wire: MCP_WIRE_ERA,
+      alignment: MCP_ALIGNMENT,
       spec_url: MCP_SPEC_URL,
-      docs: MCP_INTRO_URL,
+      docs: MCP_DOCS_HUB_URL,
+      docs_feature: MCP_INTRO_URL,
       sdk: MCP_TS_SDK_PACKAGE,
       primitives: ["tools", "resources", "prompts"],
       store: deps.store.kind,
@@ -43789,6 +43818,7 @@ function registerResources(server, deps) {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
+        await requireExistingSession(deps, sessionId, uri.href);
         return jsonContents(uri.href, await sessionInfo(deps, { session_id: sessionId }));
       } catch (err) {
         throwResourceError(err, uri.href);
@@ -43811,6 +43841,7 @@ function registerResources(server, deps) {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
+        await requireExistingSession(deps, sessionId, uri.href);
         return jsonContents(
           uri.href,
           await memoryList(deps, { session_id: sessionId, include_values: false })
@@ -43827,12 +43858,13 @@ init_esm_shims();
 
 // src/mcp/annotations.ts
 init_esm_shims();
+var CLOSED_WORLD = { openWorldHint: false };
 function readOnly(title) {
   return {
     title,
     readOnlyHint: true,
     destructiveHint: false,
-    openWorldHint: true
+    ...CLOSED_WORLD
   };
 }
 function write(title, extra) {
@@ -43840,8 +43872,9 @@ function write(title, extra) {
     title,
     readOnlyHint: false,
     destructiveHint: false,
-    openWorldHint: true,
-    ...extra
+    ...CLOSED_WORLD,
+    ...extra,
+    openWorldHint: extra?.openWorldHint ?? false
   };
 }
 function destructive(title) {
@@ -43849,7 +43882,7 @@ function destructive(title) {
     title,
     readOnlyHint: false,
     destructiveHint: true,
-    openWorldHint: true
+    ...CLOSED_WORLD
   };
 }
 
@@ -43873,7 +43906,8 @@ function toolErr(message, extra) {
   const payload = { error: message, ...extra };
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
-    structuredContent: payload,
+    // SDK v1 client validates structuredContent against outputSchema even on
+    // isError. Omit it so execution errors stay tool results, not -32602.
     isError: true
   };
 }
@@ -43986,6 +44020,108 @@ var memoryNoteSchema = {
 var traceContextSchema = {
   session_id: external_exports.string().optional().describe("Session / conversation id override.")
 };
+var peerOutput = external_exports.object({
+  agent_id: external_exports.string(),
+  role: external_exports.string(),
+  harness: external_exports.string(),
+  display_name: external_exports.string(),
+  joined_at: external_exports.string(),
+  online: external_exports.boolean()
+});
+var messageOutput = external_exports.object({
+  id: external_exports.string(),
+  from: external_exports.string(),
+  to: external_exports.string().optional(),
+  role: external_exports.string(),
+  harness: external_exports.string(),
+  kind: external_exports.enum(["chat", "status", "task", "system"]),
+  body: external_exports.string(),
+  ts: external_exports.string(),
+  traceparent: external_exports.string().optional(),
+  truncated: external_exports.boolean().optional()
+});
+var joinSessionOutputSchema = {
+  session_id: external_exports.string(),
+  agent_id: external_exports.string(),
+  namespace: external_exports.string(),
+  room_id: external_exports.string(),
+  peers: external_exports.array(peerOutput),
+  created: external_exports.boolean()
+};
+var leaveSessionOutputSchema = {
+  left: external_exports.boolean(),
+  session_id: external_exports.string(),
+  agent_id: external_exports.string()
+};
+var listPeersOutputSchema = {
+  session_id: external_exports.string(),
+  peers: external_exports.array(peerOutput),
+  peer_count: external_exports.number(),
+  online_count: external_exports.number()
+};
+var sessionInfoOutputSchema = {
+  session_id: external_exports.string(),
+  namespace: external_exports.string(),
+  store: external_exports.string(),
+  peer_count: external_exports.number(),
+  rooms: external_exports.array(external_exports.string()),
+  created_at: external_exports.string().optional(),
+  created_by: external_exports.string().optional()
+};
+var tellAgentOutputSchema = {
+  message_id: external_exports.string(),
+  pair: external_exports.string(),
+  session_id: external_exports.string()
+};
+var tellRoomOutputSchema = {
+  message_id: external_exports.string(),
+  room_id: external_exports.string(),
+  session_id: external_exports.string()
+};
+var pullMessagesOutputSchema = {
+  session_id: external_exports.string(),
+  channel: external_exports.string(),
+  messages: external_exports.array(messageOutput),
+  next_cursor: external_exports.string().optional(),
+  cursors: external_exports.record(external_exports.string()).optional(),
+  truncated: external_exports.boolean()
+};
+var createRoomOutputSchema = {
+  room_id: external_exports.string(),
+  created: external_exports.boolean(),
+  session_id: external_exports.string()
+};
+var joinRoomOutputSchema = {
+  room_id: external_exports.string(),
+  members: external_exports.number(),
+  session_id: external_exports.string()
+};
+var memorySetOutputSchema = {
+  key: external_exports.string(),
+  session_id: external_exports.string()
+};
+var memoryGetOutputSchema = {
+  key: external_exports.string(),
+  value: external_exports.string().nullable(),
+  found: external_exports.boolean(),
+  session_id: external_exports.string()
+};
+var memoryListOutputSchema = {
+  session_id: external_exports.string(),
+  keys: external_exports.array(external_exports.string()),
+  values: external_exports.record(external_exports.string()).optional(),
+  truncated: external_exports.boolean()
+};
+var memoryNoteOutputSchema = {
+  note_id: external_exports.string(),
+  session_id: external_exports.string()
+};
+var traceContextOutputSchema = {
+  session_id: external_exports.string(),
+  conversation_id: external_exports.string(),
+  traceparent: external_exports.string().nullable(),
+  namespace: external_exports.string()
+};
 
 // src/mcp/tools/memory.ts
 function registerMemoryTools(server, deps) {
@@ -43994,6 +44130,7 @@ function registerMemoryTools(server, deps) {
     {
       description: "Set a shared session fact (key/value). Use for decisions and pointers \u2014 not raw tool-call dumps. Visible to every agent in the session.",
       inputSchema: memorySetSchema,
+      outputSchema: memorySetOutputSchema,
       annotations: write("Set memory", { idempotentHint: true })
     },
     async (args) => runTool(
@@ -44008,6 +44145,7 @@ function registerMemoryTools(server, deps) {
     {
       description: "Read a shared session memory key.",
       inputSchema: memoryGetSchema,
+      outputSchema: memoryGetOutputSchema,
       annotations: readOnly("Get memory")
     },
     async (args) => runTool(
@@ -44022,6 +44160,7 @@ function registerMemoryTools(server, deps) {
     {
       description: "List shared memory keys. Set include_values for short previews.",
       inputSchema: memoryListSchema,
+      outputSchema: memoryListOutputSchema,
       annotations: readOnly("List memory")
     },
     async (args) => runTool(
@@ -44036,6 +44175,7 @@ function registerMemoryTools(server, deps) {
     {
       description: "Append an immutable note to the session notes stream.",
       inputSchema: memoryNoteSchema,
+      outputSchema: memoryNoteOutputSchema,
       annotations: write("Append memory note")
     },
     async (args) => runTool(
@@ -44055,6 +44195,7 @@ function registerMessagingTools(server, deps) {
     {
       description: "Send a DM to another agent in this session. Stored on the sorted pair stream (a:b). The recipient reads it with pull_messages inbox=true.",
       inputSchema: tellAgentSchema,
+      outputSchema: tellAgentOutputSchema,
       annotations: write("Tell agent")
     },
     async (args) => runTool(
@@ -44069,6 +44210,7 @@ function registerMessagingTools(server, deps) {
     {
       description: "Broadcast a message to a session room (default main). Other agents see it on pull_messages after idle.",
       inputSchema: tellRoomSchema,
+      outputSchema: tellRoomOutputSchema,
       annotations: write("Tell room")
     },
     async (args) => runTool(
@@ -44088,6 +44230,7 @@ function registerMessagingTools(server, deps) {
     {
       description: "Read new messages since this agent's cursor, then advance the cursor and refresh presence. Pass room_id for a room, or inbox=true (optionally other_agent_id) for DMs. Bodies longer than ~2k chars are truncated.",
       inputSchema: pullMessagesSchema,
+      outputSchema: pullMessagesOutputSchema,
       annotations: write("Pull messages")
     },
     async (args) => runTool(
@@ -44102,6 +44245,7 @@ function registerMessagingTools(server, deps) {
     {
       description: "Create a named room in the session and add the caller as a member.",
       inputSchema: createRoomSchema,
+      outputSchema: createRoomOutputSchema,
       annotations: write("Create room")
     },
     async (args) => runTool(
@@ -44116,6 +44260,7 @@ function registerMessagingTools(server, deps) {
     {
       description: "Join an existing room's membership set.",
       inputSchema: joinRoomSchema,
+      outputSchema: joinRoomOutputSchema,
       annotations: write("Join room", { idempotentHint: true })
     },
     async (args) => runTool(
@@ -44135,6 +44280,7 @@ function registerObservabilityTools(server, deps) {
     {
       description: "Return session_id, conversation_id (same as session_id / gen_ai.conversation.id), current W3C traceparent, and namespace for log correlation.",
       inputSchema: traceContextSchema,
+      outputSchema: traceContextOutputSchema,
       annotations: readOnly("Trace context")
     },
     async (args) => runTool("trace_context", deps, { sessionId: args.session_id }, async () => {
@@ -44157,6 +44303,7 @@ function registerSessionTools(server, deps) {
     {
       description: "Join a Lattice session: register this agent, ensure the main room, start presence, and return peers. Same session_id + Redis = same bus across harnesses and machines.",
       inputSchema: joinSessionSchema,
+      outputSchema: joinSessionOutputSchema,
       annotations: write("Join session", { idempotentHint: true })
     },
     async (args) => runTool(
@@ -44177,6 +44324,7 @@ function registerSessionTools(server, deps) {
     {
       description: "Leave the Lattice session and clear this agent's presence key.",
       inputSchema: leaveSessionSchema,
+      outputSchema: leaveSessionOutputSchema,
       annotations: destructive("Leave session")
     },
     async (args) => runTool(
@@ -44191,6 +44339,7 @@ function registerSessionTools(server, deps) {
     {
       description: "List agents in the session. online is true when the presence key is still alive (TTL ~45s, refreshed on join and pull).",
       inputSchema: listPeersSchema,
+      outputSchema: listPeersOutputSchema,
       annotations: readOnly("List peers")
     },
     async (args) => runTool(
@@ -44205,6 +44354,7 @@ function registerSessionTools(server, deps) {
     {
       description: "Debug snapshot: session_id, namespace, store kind, peer count, and rooms.",
       inputSchema: sessionInfoSchema,
+      outputSchema: sessionInfoOutputSchema,
       annotations: readOnly("Session info")
     },
     async (args) => runTool(
@@ -44224,7 +44374,10 @@ function createMcpServer(deps) {
       version: PACKAGE_VERSION
     },
     {
-      instructions: SERVER_INSTRUCTIONS
+      instructions: SERVER_INSTRUCTIONS,
+      // Constructor accepts ServerCapabilities. registerTool/Resource/Prompt
+      // still default listChanged:true; we re-apply false after registration.
+      capabilities: STATIC_LIST_CAPABILITIES
     }
   );
   registerSessionTools(server, deps);
@@ -44233,6 +44386,7 @@ function createMcpServer(deps) {
   registerObservabilityTools(server, deps);
   registerResources(server, deps);
   registerPrompts(server, deps);
+  server.server.registerCapabilities(STATIC_LIST_CAPABILITIES);
   return server;
 }
 async function startServer() {
