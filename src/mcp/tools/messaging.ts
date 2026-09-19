@@ -1,0 +1,104 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { pullMessages, tellAgent, tellRoom } from "../../core/messages.js";
+import { createRoom, joinRoom } from "../../core/rooms.js";
+import type { BusDeps } from "../../core/types.js";
+import { write } from "../annotations.js";
+import { toolOk } from "../result.js";
+import { runTool } from "../run.js";
+import {
+  createRoomSchema,
+  joinRoomSchema,
+  pullMessagesSchema,
+  tellAgentSchema,
+  tellRoomSchema,
+} from "../schemas.js";
+
+export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
+  server.registerTool(
+    "tell_agent",
+    {
+      description:
+        "Send a DM to another agent in this session. Stored on the sorted pair stream (a:b). The recipient reads it with pull_messages inbox=true.",
+      inputSchema: tellAgentSchema,
+      annotations: write("Tell agent"),
+    },
+    async (args) =>
+      runTool(
+        "tell_agent",
+        deps,
+        { sessionId: args.session_id, agentId: args.agent_id, harness: args.harness },
+        async () => toolOk(await tellAgent(deps, args)),
+      ),
+  );
+
+  server.registerTool(
+    "tell_room",
+    {
+      description:
+        "Broadcast a message to a session room (default main). Other agents see it on pull_messages after idle.",
+      inputSchema: tellRoomSchema,
+      annotations: write("Tell room"),
+    },
+    async (args) =>
+      runTool(
+        "tell_room",
+        deps,
+        {
+          sessionId: args.session_id,
+          agentId: args.agent_id,
+          roomId: args.room_id,
+          harness: args.harness,
+        },
+        async () => toolOk(await tellRoom(deps, args)),
+      ),
+  );
+
+  server.registerTool(
+    "pull_messages",
+    {
+      description:
+        "Read new messages since this agent's cursor, then advance the cursor and refresh presence. Pass room_id for a room, or inbox=true (optionally other_agent_id) for DMs. Bodies longer than ~2k chars are truncated.",
+      inputSchema: pullMessagesSchema,
+      annotations: write("Pull messages"),
+    },
+    async (args) =>
+      runTool(
+        "pull_messages",
+        deps,
+        { sessionId: args.session_id, agentId: args.agent_id, roomId: args.room_id },
+        async () => toolOk(await pullMessages(deps, args)),
+      ),
+  );
+
+  server.registerTool(
+    "create_room",
+    {
+      description: "Create a named room in the session and add the caller as a member.",
+      inputSchema: createRoomSchema,
+      annotations: write("Create room"),
+    },
+    async (args) =>
+      runTool(
+        "create_room",
+        deps,
+        { sessionId: args.session_id, agentId: args.agent_id, roomId: args.room_id },
+        async () => toolOk(await createRoom(deps, args)),
+      ),
+  );
+
+  server.registerTool(
+    "join_room",
+    {
+      description: "Join an existing room's membership set.",
+      inputSchema: joinRoomSchema,
+      annotations: write("Join room"),
+    },
+    async (args) =>
+      runTool(
+        "join_room",
+        deps,
+        { sessionId: args.session_id, agentId: args.agent_id, roomId: args.room_id },
+        async () => toolOk(await joinRoom(deps, args)),
+      ),
+  );
+}

@@ -1,0 +1,11 @@
+export const DEFAULT_ROOM = "main";
+export const PRESENCE_TTL_SECONDS = 45;
+export const STREAM_MAXLEN = 1000;
+export const BODY_TRUNCATE_CHARS = 2000;
+export const PULL_DEFAULT_LIMIT = 50;
+export const PULL_MAX_LIMIT = 200;
+export const MEMORY_VALUE_MAX_CHARS = 32_768;
+export const MESSAGE_BODY_MAX_CHARS = 16_384;
+export const MEMORY_LIST_PREVIEW_CHARS = 120;
+export const ID_MAX_LEN = 128;
+export const MEMORY_KEY_MAX_LEN = 256;

@@ -1,0 +1,73 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { memoryGet, memoryList, memoryNote, memorySet } from "../../core/memory.js";
+import type { BusDeps } from "../../core/types.js";
+import { readOnly, write } from "../annotations.js";
+import { toolOk } from "../result.js";
+import { runTool } from "../run.js";
+import {
+  memoryGetSchema,
+  memoryListSchema,
+  memoryNoteSchema,
+  memorySetSchema,
+} from "../schemas.js";
+
+export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
+  server.registerTool(
+    "memory_set",
+    {
+      description:
+        "Set a shared session fact (key/value). Use for decisions and pointers — not raw tool-call dumps. Visible to every agent in the session.",
+      inputSchema: memorySetSchema,
+      annotations: write("Set memory", { idempotentHint: true }),
+    },
+    async (args) =>
+      runTool(
+        "memory_set",
+        deps,
+        { sessionId: args.session_id, agentId: args.agent_id },
+        async () => toolOk(await memorySet(deps, args)),
+      ),
+  );
+
+  server.registerTool(
+    "memory_get",
+    {
+      description: "Read a shared session memory key.",
+      inputSchema: memoryGetSchema,
+      annotations: readOnly("Get memory"),
+    },
+    async (args) =>
+      runTool("memory_get", deps, { sessionId: args.session_id }, async () =>
+        toolOk(await memoryGet(deps, args)),
+      ),
+  );
+
+  server.registerTool(
+    "memory_list",
+    {
+      description: "List shared memory keys. Set include_values for short previews.",
+      inputSchema: memoryListSchema,
+      annotations: readOnly("List memory"),
+    },
+    async (args) =>
+      runTool("memory_list", deps, { sessionId: args.session_id }, async () =>
+        toolOk(await memoryList(deps, args)),
+      ),
+  );
+
+  server.registerTool(
+    "memory_note",
+    {
+      description: "Append an immutable note to the session notes stream.",
+      inputSchema: memoryNoteSchema,
+      annotations: write("Append memory note"),
+    },
+    async (args) =>
+      runTool(
+        "memory_note",
+        deps,
+        { sessionId: args.session_id, agentId: args.agent_id },
+        async () => toolOk(await memoryNote(deps, args)),
+      ),
+  );
+}
