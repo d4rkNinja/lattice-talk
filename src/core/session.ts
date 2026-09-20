@@ -15,7 +15,7 @@ import { clampListLimit, pageSortedKeys } from "./page.js";
 import { refreshPresence } from "./presence.js";
 import {
   requireJoinedSession,
-  resolveInspectSessionId,
+  resolveInspectSessionIdAuthorized,
   resolveSessionId,
 } from "./resolve.js";
 import { ensureMainRoom } from "./rooms.js";
@@ -25,31 +25,35 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function tokenHash(deps: BusDeps): string | undefined {
+  return deps.config.joinToken ? sha256Hex(deps.config.joinToken) : undefined;
+}
+
+/** sha256(config.joinToken) vs the hash stored in the session meta. */
+function hashMatches(meta: SessionMeta, hash: string | undefined): boolean {
+  return Boolean(hash && meta.join_token_hash && safeEqual(meta.join_token_hash, hash));
+}
+
 /**
- * Session-bound join token. The token itself never crosses the MCP boundary:
- * it lives in LATTICE_JOIN_TOKEN (env). The first token-authorized contact
- * with a session persists sha256(token) once; later joins must hash to the
- * same value, and processes without a token configured cannot join a session
- * that has one. Sessions created without any token stay open.
+ * Join-token policy, fixed at session creation and stored inside the session
+ * meta (created atomically with it):
+ *
+ *   session doesn't exist → create it now; policy = token (with hash) when
+ *                           this process has LATTICE_JOIN_TOKEN, else open.
+ *   policy = open         → tokens have no effect; an open session can never
+ *                           be retroactively locked.
+ *   policy = token        → this process's env token must hash to the stored
+ *                           value; processes without it cannot join.
+ *
+ * The token itself never crosses the MCP boundary: it lives in env only.
  */
-async function assertJoinToken(deps: BusDeps, sessionId: string): Promise<void> {
-  const expected = deps.config.joinToken;
-  if (expected) {
-    const hash = sha256Hex(expected);
-    await deps.store.initJoinTokenHash(sessionId, hash);
-    const stored = await deps.store.getJoinTokenHash(sessionId);
-    if (!stored || !safeEqual(stored, hash)) {
-      throw new UserError(
-        "LATTICE_JOIN_TOKEN does not match the token protecting this session.",
-        "auth",
-      );
-    }
-    return;
-  }
-  const stored = await deps.store.getJoinTokenHash(sessionId);
-  if (stored) {
+function assertJoinPolicy(meta: SessionMeta | null, deps: BusDeps): void {
+  if (!meta) return; // caller creates the session with its policy atomically
+  if (meta.join_policy === "open") return;
+  const hash = tokenHash(deps);
+  if (!hashMatches(meta, hash)) {
     throw new UserError(
-      "This session is protected by LATTICE_JOIN_TOKEN. Set the matching token in this process's env to join.",
+      "This session is token-protected. Set the matching LATTICE_JOIN_TOKEN in this process's env to join.",
       "auth",
     );
   }
@@ -75,7 +79,6 @@ export async function joinSession(
   const role = assertBoundedText(input.role, "role", ROLE_MAX_CHARS);
 
   const sessionId = resolveSessionId(deps, input.session_id);
-  await assertJoinToken(deps, sessionId);
 
   const agentId =
     optionalId(input.agent_id, "agent_id") ??
@@ -84,7 +87,9 @@ export async function joinSession(
 
   // An explicit agent_id cannot take over an identity whose presence is still
   // alive — that would let a second process impersonate an online agent.
-  // Re-joining as this process's own identity stays allowed.
+  // Re-joining as this process's own identity stays allowed. Presence is
+  // refreshed on every joined operation, so an actively working agent keeps
+  // its claim rather than losing it after a TTL of silence.
   if (input.agent_id && deps.ctx.agentId !== agentId) {
     const online = await deps.store.presenceStatus(sessionId, [agentId]);
     if (online[agentId]) {
@@ -97,14 +102,23 @@ export async function joinSession(
 
   let created = false;
   const existingMeta = await deps.store.getSessionMeta(sessionId);
+  assertJoinPolicy(existingMeta, deps);
   if (!existingMeta) {
+    const hash = tokenHash(deps);
     const meta: SessionMeta = {
       session_id: sessionId,
       namespace: deps.config.namespace,
       created_at: nowIso(),
       created_by: agentId,
+      join_policy: hash ? "token" : "open",
+      ...(hash ? { join_token_hash: hash } : {}),
     };
+    // Loser of the create race re-reads: another creator may have made the
+    // session open or token-protected in the meantime — its policy wins.
     created = await deps.store.initSessionMeta(sessionId, meta);
+    if (!created) {
+      assertJoinPolicy(await deps.store.getSessionMeta(sessionId), deps);
+    }
   }
 
   const existingAgent = await deps.store.getAgent(sessionId, agentId);
@@ -145,9 +159,12 @@ export async function leaveSession(
   deps: BusDeps,
   input: { session_id?: string } = {},
 ): Promise<{ left: boolean; session_id: string; agent_id: string }> {
-  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
+  const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
   await deps.store.clearPresence(sessionId, agentId);
   await deps.store.removeAgentFromAllRooms(sessionId, agentId);
+  // A freed agent_id must not carry the previous occupant's read cursors or
+  // DM partner list into its next life.
+  await deps.store.clearAgentState(sessionId, agentId);
   await deps.store.removeAgent(sessionId, agentId);
   deps.ctx.clearIf(sessionId, agentId);
   return { left: true, session_id: sessionId, agent_id: agentId };
@@ -164,7 +181,7 @@ export async function listPeers(
   next_cursor?: string;
   truncated: boolean;
 }> {
-  const sessionId = resolveInspectSessionId(deps, input.session_id);
+  const sessionId = await resolveInspectSessionIdAuthorized(deps, input.session_id);
   const ids = await deps.store.listAgentIds(sessionId);
   const limit = clampListLimit(input.limit, PEERS_LIST_DEFAULT_LIMIT, PEERS_LIST_MAX_LIMIT);
   const page = pageSortedKeys(ids, input.cursor, limit);
@@ -197,7 +214,7 @@ export async function sessionInfo(
   created_at?: string;
   created_by?: string;
 }> {
-  const sessionId = resolveInspectSessionId(deps, input.session_id);
+  const sessionId = await resolveInspectSessionIdAuthorized(deps, input.session_id);
   const meta = await deps.store.getSessionMeta(sessionId);
   const peer_count = await deps.store.countAgents(sessionId);
   const allRooms = await deps.store.listRooms(sessionId);
@@ -214,4 +231,4 @@ export async function sessionInfo(
   };
 }
 
-export { requireJoinedSession, resolveInspectSessionId, resolveSessionId };
+export { requireJoinedSession, resolveInspectSessionIdAuthorized, resolveSessionId };

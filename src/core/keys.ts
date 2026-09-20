@@ -29,9 +29,6 @@ export const keys = {
   sessionRooms(ns: string, sid: string): string {
     return `lattice:${ns}:session:${sessionTag(sid)}:rooms`;
   },
-  sessionJoin(ns: string, sid: string): string {
-    return `lattice:${ns}:session:${sessionTag(sid)}:join`;
-  },
   dmPartners(ns: string, sid: string, agentId: string): string {
     return `lattice:${ns}:session:${sessionTag(sid)}:dm_partners:${agentId}`;
   },

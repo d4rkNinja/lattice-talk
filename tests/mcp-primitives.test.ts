@@ -1,8 +1,7 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { MemoryStore } from "../src/core/memory-store.js";
 import { memorySet } from "../src/core/memory.js";
 import { joinSession } from "../src/core/session.js";
@@ -93,12 +92,12 @@ describe("MCP resources and prompts", () => {
     await expect(
       client.readResource({ uri: "lattice://session/does-not-exist-xyz" }),
     ).rejects.toMatchObject({
-      code: ErrorCode.InvalidParams,
+      code: -32602,
     });
     await expect(
       client.readResource({ uri: "lattice://session/does-not-exist-xyz/memory" }),
     ).rejects.toMatchObject({
-      code: ErrorCode.InvalidParams,
+      code: -32602,
     });
   });
 

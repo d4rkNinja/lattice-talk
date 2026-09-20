@@ -53,12 +53,18 @@ function parseAgent(raw: string): AgentRecord | null {
 
 /**
  * Session creation as one atomic step: claim session_id, and only the winner
- * writes the remaining metadata. Concurrent creators can never expose a
- * half-initialized session hash.
+ * writes the remaining metadata including the join policy (open | token +
+ * hash). Concurrent creators can never expose a half-initialized session, and
+ * the security policy can never exist without the session itself.
  */
 const INIT_SESSION_META_LUA = `
 if redis.call('HSETNX', KEYS[1], 'session_id', ARGV[1]) == 1 then
-  redis.call('HSET', KEYS[1], 'namespace', ARGV[2], 'created_at', ARGV[3], 'created_by', ARGV[4])
+  redis.call('HSET', KEYS[1],
+    'namespace', ARGV[2], 'created_at', ARGV[3], 'created_by', ARGV[4],
+    'join_policy', ARGV[5])
+  if ARGV[6] ~= '' then
+    redis.call('HSET', KEYS[1], 'join_token_hash', ARGV[6])
+  end
   return 1
 end
 return 0
@@ -130,12 +136,17 @@ export class RedisStore implements Store {
   async getSessionMeta(sessionId: string): Promise<SessionMeta | null> {
     const data = await this.redis.hgetall(keys.sessionMeta(this.ns, sessionId));
     if (!data || !data.session_id) return null;
-    return {
+    const meta: SessionMeta = {
       session_id: data.session_id,
       namespace: data.namespace ?? this.ns,
       created_at: data.created_at ?? "",
       created_by: data.created_by ?? "",
+      join_policy: data.join_policy === "token" ? "token" : "open",
     };
+    if (meta.join_policy === "token" && data.join_token_hash) {
+      meta.join_token_hash = data.join_token_hash;
+    }
+    return meta;
   }
 
   async initSessionMeta(sessionId: string, meta: SessionMeta): Promise<boolean> {
@@ -147,6 +158,8 @@ export class RedisStore implements Store {
       meta.namespace,
       meta.created_at,
       meta.created_by,
+      meta.join_policy,
+      meta.join_policy === "token" ? meta.join_token_hash ?? "" : "",
     );
     return created === 1;
   }
@@ -191,17 +204,16 @@ export class RedisStore implements Store {
     await this.redis.hdel(keys.sessionAgents(this.ns, sessionId), agentId);
   }
 
-  async getJoinTokenHash(sessionId: string): Promise<string | null> {
-    return this.redis.get(keys.sessionJoin(this.ns, sessionId));
-  }
-
-  async initJoinTokenHash(sessionId: string, hash: string): Promise<boolean> {
-    const result = await this.redis.set(
-      keys.sessionJoin(this.ns, sessionId),
-      hash,
-      "NX",
-    );
-    return result === "OK";
+  async clearAgentState(sessionId: string, agentId: string): Promise<void> {
+    const pattern = `${keys.cursor(this.ns, sessionId, agentId, "")}*`;
+    const pipeline = this.redis.pipeline();
+    for await (const batch of this.redis.scanStream({ match: pattern, count: 200 })) {
+      for (const key of batch as string[]) {
+        pipeline.del(key);
+      }
+    }
+    pipeline.del(keys.dmPartners(this.ns, sessionId, agentId));
+    await pipeline.exec();
   }
 
   async touchPresence(sessionId: string, agentId: string, ttlSeconds: number): Promise<void> {
@@ -347,12 +359,14 @@ export class RedisStore implements Store {
     value: string,
     meta?: Record<string, string>,
   ): Promise<void> {
-    const pipeline = this.redis.pipeline();
-    pipeline.hset(keys.memoryKv(this.ns, sessionId), key, value);
+    // MULTI/EXEC, not a bare pipeline: the metadata must belong to exactly the
+    // value being written, even under concurrent writers.
+    const multi = this.redis.multi();
+    multi.hset(keys.memoryKv(this.ns, sessionId), key, value);
     if (meta && Object.keys(meta).length > 0) {
-      pipeline.hset(keys.memoryMeta(this.ns, sessionId, key), meta);
+      multi.hset(keys.memoryMeta(this.ns, sessionId, key), meta);
     }
-    await pipeline.exec();
+    await multi.exec();
   }
 
   async memoryGet(sessionId: string, key: string): Promise<string | null> {

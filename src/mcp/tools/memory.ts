@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   memoryGet,
   memoryList,
@@ -6,7 +6,6 @@ import {
   memoryNotes,
   memorySet,
 } from "../../core/memory.js";
-import { resolveInspectSessionId } from "../../core/resolve.js";
 import type { BusDeps } from "../../core/types.js";
 import { readOnly, write } from "../annotations.js";
 import { toolOk } from "../result.js";
@@ -52,10 +51,12 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
       annotations: readOnly("Get memory"),
     },
     async (args) =>
-      runTool("memory_get", deps, { sessionId: args.session_id }, async () => {
-        const sessionId = resolveInspectSessionId(deps, args.session_id);
-        return toolOk(await memoryGet(deps, { ...args, session_id: sessionId }));
-      }),
+      runTool(
+        "memory_get",
+        deps,
+        { sessionId: args.session_id },
+        async () => toolOk(await memoryGet(deps, args)),
+      ),
   );
 
   server.registerTool(
@@ -68,10 +69,12 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
       annotations: readOnly("List memory"),
     },
     async (args) =>
-      runTool("memory_list", deps, { sessionId: args.session_id }, async () => {
-        const sessionId = resolveInspectSessionId(deps, args.session_id);
-        return toolOk(await memoryList(deps, { ...args, session_id: sessionId }));
-      }),
+      runTool(
+        "memory_list",
+        deps,
+        { sessionId: args.session_id },
+        async () => toolOk(await memoryList(deps, args)),
+      ),
   );
 
   server.registerTool(
@@ -102,9 +105,11 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
       annotations: readOnly("Read memory notes"),
     },
     async (args) =>
-      runTool("memory_notes", deps, { sessionId: args.session_id }, async () => {
-        const sessionId = resolveInspectSessionId(deps, args.session_id);
-        return toolOk(await memoryNotes(deps, { ...args, session_id: sessionId }));
-      }),
+      runTool(
+        "memory_notes",
+        deps,
+        { sessionId: args.session_id },
+        async () => toolOk(await memoryNotes(deps, args)),
+      ),
   );
 }

@@ -63,7 +63,7 @@ export async function createRoom(
     display_name?: string;
   },
 ): Promise<{ room_id: string; created: boolean; session_id: string }> {
-  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
+  const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
   const { created, meta } = await ensureRoom(
     deps,
     sessionId,
@@ -79,7 +79,7 @@ export async function joinRoom(
   deps: BusDeps,
   input: { session_id?: string; room_id: string },
 ): Promise<{ room_id: string; members: number; session_id: string }> {
-  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
+  const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
   const roomId = assertId(input.room_id, "room_id");
   const meta = await deps.store.getRoomMeta(sessionId, roomId);
   if (!meta) {

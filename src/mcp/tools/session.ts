@@ -1,5 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { resolveInspectSessionId } from "../../core/resolve.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   joinSession,
   leaveSession,
@@ -74,10 +73,12 @@ export function registerSessionTools(server: McpServer, deps: BusDeps): void {
       annotations: readOnly("List peers"),
     },
     async (args) =>
-      runTool("list_peers", deps, { sessionId: args.session_id }, async () => {
-        const sessionId = resolveInspectSessionId(deps, args.session_id);
-        return toolOk(await listPeers(deps, { ...args, session_id: sessionId }));
-      }),
+      runTool(
+        "list_peers",
+        deps,
+        { sessionId: args.session_id },
+        async () => toolOk(await listPeers(deps, args)),
+      ),
   );
 
   server.registerTool(
@@ -90,9 +91,11 @@ export function registerSessionTools(server: McpServer, deps: BusDeps): void {
       annotations: readOnly("Session info"),
     },
     async (args) =>
-      runTool("session_info", deps, { sessionId: args.session_id }, async () => {
-        const sessionId = resolveInspectSessionId(deps, args.session_id);
-        return toolOk(await sessionInfo(deps, { session_id: sessionId }));
-      }),
+      runTool(
+        "session_info",
+        deps,
+        { sessionId: args.session_id },
+        async () => toolOk(await sessionInfo(deps, args)),
+      ),
   );
 }

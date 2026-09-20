@@ -1,4 +1,5 @@
 import {
+  NAMESPACE_MAX_LEN,
   PRESENCE_TTL_MAX_SECONDS,
   PRESENCE_TTL_MIN_SECONDS,
   PRESENCE_TTL_SECONDS,
@@ -53,12 +54,6 @@ function envFlag(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
-function envInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 /** Named numeric knobs must be valid integers in range — fail fast at startup. */
 function envIntInRange(
   env: NodeJS.ProcessEnv,
@@ -86,6 +81,25 @@ function envPort(env: NodeJS.ProcessEnv, name: string, fallback: number): number
   return n;
 }
 
+/**
+ * The namespace is embedded verbatim into Redis keys. Restrict it like other
+ * public IDs: braces in particular would corrupt Redis Cluster hash tags.
+ */
+function envNamespace(env: NodeJS.ProcessEnv): string {
+  const raw = (env.LATTICE_NAMESPACE ?? "dev").trim() || "dev";
+  if (raw.length > NAMESPACE_MAX_LEN) {
+    throw new Error(
+      `LATTICE_NAMESPACE must be at most ${NAMESPACE_MAX_LEN} characters (got ${raw.length}).`,
+    );
+  }
+  if (!/^[A-Za-z0-9._-]+$/.test(raw)) {
+    throw new Error(
+      `LATTICE_NAMESPACE may only contain letters, numbers, and . _ - (got ${JSON.stringify(raw)}).`,
+    );
+  }
+  return raw;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): LatticeConfig {
   const storeRaw = (env.LATTICE_STORE ?? "redis").trim().toLowerCase();
   if (storeRaw !== "redis" && storeRaw !== "memory") {
@@ -100,7 +114,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LatticeConfig 
 
   return {
     store,
-    namespace: (env.LATTICE_NAMESPACE ?? "dev").trim() || "dev",
+    namespace: envNamespace(env),
     defaultSessionId: env.LATTICE_DEFAULT_SESSION_ID?.trim() || undefined,
     joinToken: env.LATTICE_JOIN_TOKEN?.trim() || undefined,
     redisUrl,
@@ -108,7 +122,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LatticeConfig 
     redisPort: envPort(env, "REDIS_PORT", 6379),
     redisUsername: env.REDIS_USERNAME?.trim() || undefined,
     redisPassword: env.REDIS_PASSWORD || undefined,
-    redisDb: envInt(env.REDIS_DB, 0),
+    redisDb: envIntInRange(env, "REDIS_DB", 0, 0, 9999),
     redisSsl: envFlag(env.REDIS_SSL) || sslFromUrl,
     otelEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim() || undefined,
     otelServiceName: (env.OTEL_SERVICE_NAME ?? "lattice-talk").trim() || "lattice-talk",

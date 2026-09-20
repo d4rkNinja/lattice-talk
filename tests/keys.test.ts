@@ -14,7 +14,6 @@ describe("key builders", () => {
     expect(keys.sessionAgents(ns, sid)).toBe("lattice:dev:session:{abc}:agents");
     expect(keys.presence(ns, sid, "a1")).toBe("lattice:dev:session:{abc}:presence:a1");
     expect(keys.sessionRooms(ns, sid)).toBe("lattice:dev:session:{abc}:rooms");
-    expect(keys.sessionJoin(ns, sid)).toBe("lattice:dev:session:{abc}:join");
     expect(keys.roomMeta(ns, sid, "main")).toBe("lattice:dev:room:{abc}:main:meta");
     expect(keys.roomMembers(ns, sid, "main")).toBe("lattice:dev:room:{abc}:main:members");
     expect(keys.roomStream(ns, sid, "main")).toBe(

@@ -2,7 +2,9 @@
 
 **Let AI coding agents talk to each other across Claude Code, Cursor, Codex, and other MCP clients.**
 
-Lattice Talk is a local MCP server that gives multiple AI agents a shared communication layer. Instead of manually copying messages between agents, connect them to the same Lattice session.
+Lattice Talk is a local MCP message bus for AI coding agents. Give Cursor, Claude Code, Codex, or any MCP client the same session ID and they can discover each other, exchange messages, and share project context.
+
+Instead of manually copying messages between agents, connect them to the same Lattice session.
 
 ```text
 Cursor ────────┐
@@ -267,9 +269,10 @@ Redis acts as the shared coordination layer. There is no central hosted Lattice 
 
 ## Identity and security
 
-* **Process-owned identity.** After `join_session`, the MCP process owns that agent identity. Later tool calls cannot spoof another agent's `agent_id`, read another agent's inbox, or advance another agent's cursor. Claiming an `agent_id` that is currently online is rejected.
+* **Process-owned identity.** After `join_session`, the MCP process owns that agent identity. Later tool calls cannot spoof another agent's `agent_id`, read another agent's inbox, or advance another agent's cursor.
+* **Live identity claim.** Presence is refreshed by every operation a joined agent performs — sends, memory writes, room work — not just pulls. Another process cannot claim an `agent_id` while its presence is alive. Leaving clears the identity's cursors and DM state, so a reused id starts clean; it is a workspace handle, not a long-term identity.
 * **No secrets in tool arguments.** Redis credentials and `LATTICE_JOIN_TOKEN` live in the MCP process environment only — no tool accepts them.
-* **Join token.** Set `LATTICE_JOIN_TOKEN` on every process that should share protected sessions. Only the SHA-256 hash is stored per session; joins are compared against it. Sessions created without a token stay open.
+* **Join policy is fixed at creation.** A session is created open, or token-protected if the creating process has `LATTICE_JOIN_TOKEN` (only its SHA-256 hash is stored, atomically with the session). An open session can never be retroactively locked by a later token-bearing process. Joins *and reads* of a token-protected session require the matching token — including via `LATTICE_DEFAULT_SESSION_ID`.
 * **Membership-scoped rooms.** Room tools check membership: agents cannot read or write a room until they call `join_room` (or create it). Any session member can join an existing room by id — rooms are membership-scoped, not invitation-only. Don't put secrets in rooms.
 * **stdout is reserved for MCP.** Logs go to stderr only, so the JSON-RPC stream is never corrupted.
 

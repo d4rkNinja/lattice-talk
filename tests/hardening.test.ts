@@ -1,14 +1,13 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vitest";
-import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig } from "../src/core/config.js";
 import { UserError } from "../src/core/errors.js";
 import { assertBoundedText, assertId } from "../src/core/ids.js";
-import { memoryGet, memoryNote, memoryNotes, memorySet } from "../src/core/memory.js";
+import { memoryGet, memoryList, memoryNote, memoryNotes, memorySet } from "../src/core/memory.js";
 import { MemoryStore } from "../src/core/memory-store.js";
-import { pullMessages, tellRoom } from "../src/core/messages.js";
-import { joinSession, leaveSession } from "../src/core/session.js";
+import { pullMessages, tellAgent, tellRoom } from "../src/core/messages.js";
+import { joinSession, leaveSession, listPeers } from "../src/core/session.js";
 import { createMcpServer } from "../src/mcp/server.js";
 import { expectToolOk, makeDeps, testConfig } from "./helpers.js";
 
@@ -72,7 +71,9 @@ describe("env-only session-bound join token", () => {
     const store = new MemoryStore("tok2");
     const guarded = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "env-secret" }));
     await joinSession(guarded, { session_id: "s1", role: "fe" });
-    expect(await store.getJoinTokenHash("s1")).toBeTruthy();
+    const meta1 = await store.getSessionMeta("s1");
+    expect(meta1?.join_policy).toBe("token");
+    expect(meta1?.join_token_hash).toBeTruthy();
 
     // A process with no token configured cannot join the protected session.
     const tokenless = makeDeps(store);
@@ -83,7 +84,8 @@ describe("env-only session-bound join token", () => {
     // Sessions created without any token stay open.
     const open = await joinSession(tokenless, { session_id: "s2", role: "fe" });
     expect(open.created).toBe(true);
-    expect(await store.getJoinTokenHash("s2")).toBeNull();
+    const meta2 = await store.getSessionMeta("s2");
+    expect(meta2?.join_policy).toBe("open");
   });
 });
 
@@ -193,6 +195,81 @@ describe("memory notes are readable", () => {
   });
 });
 
+describe("token-protected sessions refuse unauthorized reads", () => {
+  it("gates default-session reads behind the env token", async () => {
+    const store = new MemoryStore("tokread");
+    const owner = makeDeps(
+      store,
+      testConfig({ LATTICE_JOIN_TOKEN: "secret", LATTICE_DEFAULT_SESSION_ID: "prot" }),
+    );
+    await joinSession(owner, { role: "fe", agent_id: "fe" });
+    await memorySet(owner, { key: "k", value: "secret-value" });
+
+    // A tokenless process pointed at the same default session cannot read it.
+    const outsider = makeDeps(store, testConfig({ LATTICE_DEFAULT_SESSION_ID: "prot" }));
+    await expect(memoryGet(outsider, { key: "k" })).rejects.toMatchObject({ code: "auth" });
+    await expect(memoryList(outsider, {})).rejects.toMatchObject({ code: "auth" });
+    await expect(listPeers(outsider, {})).rejects.toMatchObject({ code: "auth" });
+
+    // A process with the matching token can read.
+    const reader = makeDeps(
+      store,
+      testConfig({ LATTICE_JOIN_TOKEN: "secret", LATTICE_DEFAULT_SESSION_ID: "prot" }),
+    );
+    const got = await memoryGet(reader, { key: "k" });
+    expect(got.found).toBe(true);
+    expect(got.value).toBe("secret-value");
+  });
+});
+
+describe("presence reflects every joined operation", () => {
+  it("a sending agent stays online and keeps its agent_id claim", async () => {
+    let now = 1_000_000;
+    const store = new MemoryStore("presence", () => now);
+    const a = makeDeps(store);
+    const b = makeDeps(store);
+    await joinSession(a, { session_id: "s1", role: "fe", agent_id: "fe" });
+    await joinSession(b, { session_id: "s1", role: "be", agent_id: "be" });
+
+    // Beyond the 45s TTL with no pulls — only sends happened since.
+    now += 46_000;
+    await tellRoom(a, { body: "still here" });
+
+    const peers = await listPeers(b, { session_id: "s1" });
+    const fe = peers.peers.find((p) => p.agent_id === "fe");
+    expect(fe?.online).toBe(true);
+
+    // Another process cannot claim the still-active identity.
+    const c = makeDeps(store);
+    await expect(
+      joinSession(c, { session_id: "s1", role: "x", agent_id: "fe" }),
+    ).rejects.toSatisfy(
+      (err: unknown) => err instanceof UserError && err.message.includes("already online"),
+    );
+  });
+});
+
+describe("leave_session clears per-agent state", () => {
+  it("drops cursors and DM partners so a reused id starts clean", async () => {
+    const store = new MemoryStore("leaveclean");
+    const a = makeDeps(store);
+    const b = makeDeps(store);
+    await joinSession(a, { session_id: "s1", role: "fe", agent_id: "fe" });
+    await joinSession(b, { session_id: "s1", role: "be", agent_id: "be" });
+
+    await tellAgent(a, { to_agent_id: "be", body: "hello" });
+    await pullMessages(b, { inbox: true });
+    expect(await store.getCursor("s1", "be", "dm:be:fe")).toBeTruthy();
+    expect(await store.listDmPartners("s1", "be")).toEqual(["fe"]);
+
+    await leaveSession(b, {});
+    expect(await store.getCursor("s1", "be", "dm:be:fe")).toBeNull();
+    expect(await store.listDmPartners("s1", "be")).toEqual([]);
+    // The other agent's state is untouched.
+    expect(await store.listDmPartners("s1", "fe")).toEqual(["be"]);
+  });
+});
+
 describe("resources enforce the same session authorization as tools", () => {
   it("rejects arbitrary session ids until joined", async () => {
     const store = new MemoryStore("res-auth");
@@ -203,10 +280,10 @@ describe("resources enforce the same session authorization as tools", () => {
 
     await expect(
       client.readResource({ uri: "lattice://session/some-session" }),
-    ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+    ).rejects.toMatchObject({ code: -32602 });
     await expect(
       client.readResource({ uri: "lattice://session/some-session/memory" }),
-    ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+    ).rejects.toMatchObject({ code: -32602 });
 
     expectToolOk(
       await client.callTool({

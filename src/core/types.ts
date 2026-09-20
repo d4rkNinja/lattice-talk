@@ -6,11 +6,17 @@ export type MessageKind = "chat" | "status" | "task" | "system";
 
 export const MESSAGE_KINDS: readonly MessageKind[] = ["chat", "status", "task", "system"];
 
+export type JoinPolicy = "open" | "token";
+
 export interface SessionMeta {
   session_id: string;
   namespace: string;
   created_at: string;
   created_by: string;
+  /** Security policy, fixed at creation: "open" (default) or "token". */
+  join_policy: JoinPolicy;
+  /** sha256(LATTICE_JOIN_TOKEN) when join_policy is "token". */
+  join_token_hash?: string;
 }
 
 export interface AgentRecord {

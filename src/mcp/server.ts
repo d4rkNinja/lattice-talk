@@ -1,5 +1,5 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { loadConfig } from "../core/config.js";
 import { RuntimeContext } from "../core/context.js";
 import { createStore, type Store } from "../core/store.js";
@@ -24,8 +24,8 @@ export function createMcpServer(deps: BusDeps): McpServer {
     },
     {
       instructions: SERVER_INSTRUCTIONS,
-      // Constructor accepts ServerCapabilities. registerTool/Resource/Prompt
-      // still default listChanged:true; we re-apply false after registration.
+      // v2 uses the constructor capabilities as-is; Lattice never emits
+      // list_changed notifications, so all three lists advertise false.
       capabilities: STATIC_LIST_CAPABILITIES,
     },
   );
@@ -35,7 +35,6 @@ export function createMcpServer(deps: BusDeps): McpServer {
   registerObservabilityTools(server, deps);
   registerResources(server, deps);
   registerPrompts(server, deps);
-  server.server.registerCapabilities(STATIC_LIST_CAPABILITIES);
   return server;
 }
 

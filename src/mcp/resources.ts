@@ -1,9 +1,9 @@
-import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/server";
+import { INVALID_PARAMS, ProtocolError, ResourceNotFoundError } from "@modelcontextprotocol/server";
 import { isUserError } from "../core/errors.js";
 import { assertId } from "../core/ids.js";
 import { memoryList } from "../core/memory.js";
-import { resolveInspectSessionId } from "../core/resolve.js";
+import { resolveInspectSessionIdAuthorized } from "../core/resolve.js";
 import { sessionInfo } from "../core/session.js";
 import type { BusDeps } from "../core/types.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../version.js";
@@ -38,38 +38,20 @@ function jsonContents(uri: string, data: unknown) {
 }
 
 function throwResourceError(err: unknown, uri: string): never {
-  if (err instanceof McpError) {
+  if (err instanceof ProtocolError) {
     throw err;
   }
   if (isUserError(err)) {
-    throw new McpError(ErrorCode.InvalidParams, err.message, { uri });
+    // -32602 for auth/validation denials: like a missing resource, the caller
+    // gets no confirmation the session exists.
+    throw new ProtocolError(INVALID_PARAMS, err.message, { uri });
   }
   const message = err instanceof Error ? err.message : String(err);
-  throw new McpError(ErrorCode.InternalError, message, { uri });
+  throw new ProtocolError(-32603, message, { uri });
 }
 
 function throwResourceNotFound(uri: string): never {
-  throw new McpError(ErrorCode.InvalidParams, "Resource not found", { uri });
-}
-
-/**
- * Same authorization as the read tools: an arbitrary existing session id is
- * not readable just because it exists — it must be the joined session or
- * LATTICE_DEFAULT_SESSION_ID.
- */
-async function authorizeSession(deps: BusDeps, sessionId: string, uri: string): Promise<void> {
-  try {
-    resolveInspectSessionId(deps, sessionId);
-  } catch (err) {
-    throwResourceError(err, uri);
-  }
-}
-
-async function requireExistingSession(deps: BusDeps, sessionId: string, uri: string): Promise<void> {
-  const meta = await deps.store.getSessionMeta(sessionId);
-  if (!meta) {
-    throwResourceNotFound(uri);
-  }
+  throw new ResourceNotFoundError(uri, "Resource not found");
 }
 
 function parseSessionId(raw: unknown, uri: string): string {
@@ -81,9 +63,17 @@ function parseSessionId(raw: unknown, uri: string): string {
   }
 }
 
-function listedDefaultSession(deps: BusDeps) {
+interface ListedResource {
+  uri: string;
+  name: string;
+  title: string;
+  description: string;
+  mimeType: string;
+}
+
+function listedDefaultSession(deps: BusDeps): { resources: ListedResource[] } {
   const sid = deps.config.defaultSessionId;
-  if (!sid) return { resources: [] as { uri: string; name: string; title: string; description: string; mimeType: string }[] };
+  if (!sid) return { resources: [] };
   return {
     resources: [
       {
@@ -97,9 +87,9 @@ function listedDefaultSession(deps: BusDeps) {
   };
 }
 
-function listedDefaultMemory(deps: BusDeps) {
+function listedDefaultMemory(deps: BusDeps): { resources: ListedResource[] } {
   const sid = deps.config.defaultSessionId;
-  if (!sid) return { resources: [] as { uri: string; name: string; title: string; description: string; mimeType: string }[] };
+  if (!sid) return { resources: [] };
   return {
     resources: [
       {
@@ -117,7 +107,8 @@ function listedDefaultMemory(deps: BusDeps) {
  * Official MCP resources: one static identity doc + two URI templates.
  * Not a filesystem server. List contents come from process env (default
  * session), not from join_session, so they do not vary as a side effect
- * of other requests (feature-aligned 2026-07-28 resources/list rule).
+ * of other requests. Reads enforce the same session + token authorization
+ * as the read tools.
  */
 export function registerResources(server: McpServer, deps: BusDeps): void {
   server.registerResource(
@@ -126,7 +117,7 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     {
       title: "Lattice about",
       description:
-        "Server identity, feature-aligned 2026-07-28 primitives, SDK v1 / initialize wire. No secrets.",
+        "Server identity, feature-aligned 2026-07-28 primitives, SDK v2 initialize-era wire. No secrets.",
       mimeType: "application/json",
     },
     async (uri) =>
@@ -173,8 +164,11 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
-        await authorizeSession(deps, sessionId, uri.href);
-        await requireExistingSession(deps, sessionId, uri.href);
+        await resolveInspectSessionIdAuthorized(deps, sessionId);
+        const meta = await deps.store.getSessionMeta(sessionId);
+        if (!meta) {
+          throwResourceNotFound(uri.href);
+        }
         return jsonContents(uri.href, await sessionInfo(deps, { session_id: sessionId }));
       } catch (err) {
         throwResourceError(err, uri.href);
@@ -199,8 +193,11 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
-        await authorizeSession(deps, sessionId, uri.href);
-        await requireExistingSession(deps, sessionId, uri.href);
+        await resolveInspectSessionIdAuthorized(deps, sessionId);
+        const meta = await deps.store.getSessionMeta(sessionId);
+        if (!meta) {
+          throwResourceNotFound(uri.href);
+        }
         return jsonContents(
           uri.href,
           await memoryList(deps, {

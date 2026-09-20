@@ -11,14 +11,14 @@ import {
 } from "./limits.js";
 import { truncateBody } from "./messages.js";
 import { clampListLimit, pageSortedKeys } from "./page.js";
-import { requireJoinedSession, resolveInspectSessionId } from "./resolve.js";
+import { requireJoinedSession, resolveInspectSessionIdAuthorized } from "./resolve.js";
 import type { BusDeps } from "./types.js";
 
 export async function memorySet(
   deps: BusDeps,
   input: { session_id?: string; key: string; value: string },
 ): Promise<{ key: string; session_id: string }> {
-  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
+  const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
   const key = assertMemoryKey(input.key);
   if (input.value === undefined || input.value === null) {
     throw new UserError("value is required.");
@@ -44,7 +44,7 @@ export async function memoryGet(
   updated_by?: string;
   session_id: string;
 }> {
-  const sessionId = resolveInspectSessionId(deps, input.session_id);
+  const sessionId = await resolveInspectSessionIdAuthorized(deps, input.session_id);
   const key = assertMemoryKey(input.key);
   const value = await deps.store.memoryGet(sessionId, key);
   if (value === null) {
@@ -71,7 +71,7 @@ export async function memoryList(
   next_cursor?: string;
   truncated: boolean;
 }> {
-  const sessionId = resolveInspectSessionId(deps, input.session_id);
+  const sessionId = await resolveInspectSessionIdAuthorized(deps, input.session_id);
   const allKeys = await deps.store.memoryKeys(sessionId);
   const limit = clampListLimit(input.limit, MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT);
   const page = pageSortedKeys(allKeys, input.cursor, limit);
@@ -105,7 +105,7 @@ export async function memoryNote(
   deps: BusDeps,
   input: { session_id?: string; body: string },
 ): Promise<{ note_id: string; session_id: string }> {
-  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
+  const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
   const body = assertBoundedText(input.body, "body", NOTE_BODY_MAX_CHARS);
   const noteId = await deps.store.appendNote(sessionId, {
     from: agentId,
@@ -133,7 +133,7 @@ export async function memoryNotes(
   next_cursor?: string;
   truncated: boolean;
 }> {
-  const sessionId = resolveInspectSessionId(deps, input.session_id);
+  const sessionId = await resolveInspectSessionIdAuthorized(deps, input.session_id);
   const limit = clampListLimit(input.limit, NOTES_LIST_DEFAULT_LIMIT, NOTES_LIST_MAX_LIMIT);
   const afterId = input.cursor?.trim() || "0-0";
   const entries = await deps.store.readNotes(sessionId, afterId, limit + 1);

@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { pullMessages, tellAgent, tellRoom } from "../../core/messages.js";
 import { createRoom, joinRoom } from "../../core/rooms.js";
 import type { BusDeps } from "../../core/types.js";

@@ -14,6 +14,7 @@ export const PEERS_LIST_MAX_LIMIT = 200;
 export const SESSION_ROOMS_CAP = 200;
 export const ID_MAX_LEN = 128;
 export const MEMORY_KEY_MAX_LEN = 256;
+export const NAMESPACE_MAX_LEN = 64;
 export const ROLE_MAX_CHARS = 64;
 export const HARNESS_MAX_CHARS = 64;
 export const DISPLAY_NAME_MAX_CHARS = 128;

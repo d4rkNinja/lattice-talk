@@ -8,7 +8,6 @@ import {
   PULL_DEFAULT_LIMIT,
   PULL_MAX_LIMIT,
 } from "./limits.js";
-import { refreshPresence } from "./presence.js";
 import { requireJoinedSession } from "./resolve.js";
 import { assertRoomMember } from "./rooms.js";
 import { compareStreamIds } from "./stream.js";
@@ -102,7 +101,7 @@ export async function tellRoom(
     kind?: string;
   },
 ): Promise<{ message_id: string; room_id: string; session_id: string }> {
-  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
+  const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
   const roomId = assertId(input.room_id?.trim() || DEFAULT_ROOM, "room_id");
   const meta = await deps.store.getRoomMeta(sessionId, roomId);
   if (!meta) {
@@ -133,7 +132,7 @@ export async function tellAgent(
     kind?: string;
   },
 ): Promise<{ message_id: string; pair: string; session_id: string }> {
-  const { sessionId, agentId: from } = requireJoinedSession(deps, input.session_id);
+  const { sessionId, agentId: from } = await requireJoinedSession(deps, input.session_id);
   const to = assertId(input.to_agent_id, "to_agent_id");
   if (from === to) {
     throw new UserError("Cannot DM yourself.");
@@ -203,8 +202,7 @@ export async function pullMessages(
     limit?: number;
   },
 ): Promise<PullResult> {
-  const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
-  await refreshPresence(deps, sessionId, agentId);
+  const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
 
   const limit = clampPullLimit(input.limit);
   const inbox =

@@ -70,8 +70,20 @@ export class MemoryStore implements Store {
     const namespace = h.get("namespace");
     const created_at = h.get("created_at");
     const created_by = h.get("created_by");
+    const join_policy = h.get("join_policy");
     if (!session_id || !namespace || !created_at || !created_by) return null;
-    return { session_id, namespace, created_at, created_by };
+    const meta: SessionMeta = {
+      session_id,
+      namespace,
+      created_at,
+      created_by,
+      join_policy: join_policy === "token" ? "token" : "open",
+    };
+    const join_token_hash = h.get("join_token_hash");
+    if (meta.join_policy === "token" && join_token_hash) {
+      meta.join_token_hash = join_token_hash;
+    }
+    return meta;
   }
 
   async initSessionMeta(sessionId: string, meta: SessionMeta): Promise<boolean> {
@@ -83,6 +95,10 @@ export class MemoryStore implements Store {
     h.set("namespace", meta.namespace);
     h.set("created_at", meta.created_at);
     h.set("created_by", meta.created_by);
+    h.set("join_policy", meta.join_policy);
+    if (meta.join_policy === "token" && meta.join_token_hash) {
+      h.set("join_token_hash", meta.join_token_hash);
+    }
     return true;
   }
 
@@ -127,15 +143,14 @@ export class MemoryStore implements Store {
     this.hashes.get(keys.sessionAgents(this.ns, sessionId))?.delete(agentId);
   }
 
-  async getJoinTokenHash(sessionId: string): Promise<string | null> {
-    return this.readString(keys.sessionJoin(this.ns, sessionId));
-  }
-
-  async initJoinTokenHash(sessionId: string, hash: string): Promise<boolean> {
-    const key = keys.sessionJoin(this.ns, sessionId);
-    if (this.readString(key) !== null) return false;
-    this.strings.set(key, { value: hash });
-    return true;
+  async clearAgentState(sessionId: string, agentId: string): Promise<void> {
+    const cursorPrefix = `${keys.cursor(this.ns, sessionId, agentId, "")}`;
+    for (const key of [...this.strings.keys()]) {
+      if (key.startsWith(cursorPrefix)) {
+        this.strings.delete(key);
+      }
+    }
+    this.sets.delete(keys.dmPartners(this.ns, sessionId, agentId));
   }
 
   async touchPresence(sessionId: string, agentId: string, ttlSeconds: number): Promise<void> {

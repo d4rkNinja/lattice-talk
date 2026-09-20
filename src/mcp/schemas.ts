@@ -1,20 +1,39 @@
 import { z } from "zod";
 import { CLAUDE_CODE_PROPERTY_NAME } from "./instructions.js";
 
-/** Flat Zod shapes — no root anyOf/oneOf/allOf. ASCII names. No secrets. */
+/**
+ * SDK v2 style: each tool input/output is a z.object (StandardSchema).
+ * Flat — no root anyOf/oneOf/allOf. ASCII names. No secrets.
+ */
 
 /** Public ids: letters, digits, and . _ - (no ':' — composite keys join with ':'). */
 const ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 /** Optional-id variant that still lets an empty string fall through to core fallbacks. */
 const OPTIONAL_ID_PATTERN = /^[A-Za-z0-9._-]*$/;
 
-export const joinSessionSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Session to join. Falls back to last join or LATTICE_DEFAULT_SESSION_ID."),
+const sessionIdField = z
+  .string()
+  .max(128)
+  .regex(OPTIONAL_ID_PATTERN)
+  .optional()
+  .describe("Session to join. Falls back to last join or LATTICE_DEFAULT_SESSION_ID.");
+
+const inspectSessionField = z
+  .string()
+  .max(128)
+  .regex(OPTIONAL_ID_PATTERN)
+  .optional()
+  .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID.");
+
+const joinedSessionField = z
+  .string()
+  .max(128)
+  .regex(OPTIONAL_ID_PATTERN)
+  .optional()
+  .describe("Must match the joined session if set. Sender is this process.");
+
+export const joinSessionSchema = z.object({
+  session_id: sessionIdField,
   role: z
     .string()
     .min(1)
@@ -32,24 +51,19 @@ export const joinSessionSchema = {
     .optional()
     .describe("Harness name: claude-code, cursor, codex, custom."),
   display_name: z.string().max(128).optional().describe("Human-readable name shown to peers."),
-};
+});
 
-export const leaveSessionSchema = {
+export const leaveSessionSchema = z.object({
   session_id: z
     .string()
     .max(128)
     .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. This process leaves; you cannot kick another agent."),
-};
+});
 
-export const listPeersSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
+export const listPeersSchema = z.object({
+  session_id: inspectSessionField,
   cursor: z.string().max(256).optional().describe("Paginate after this agent_id (sorted)."),
   limit: z
     .coerce.number()
@@ -58,24 +72,14 @@ export const listPeersSchema = {
     .max(200)
     .optional()
     .describe("Max peers to return. Default 100, max 200."),
-};
+});
 
-export const sessionInfoSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
-};
+export const sessionInfoSchema = z.object({
+  session_id: inspectSessionField,
+});
 
-export const tellAgentSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session if set. Sender is this process."),
+export const tellAgentSchema = z.object({
+  session_id: joinedSessionField,
   to_agent_id: z
     .string()
     .max(128)
@@ -90,15 +94,10 @@ export const tellAgentSchema = {
     .enum(["chat", "status", "task", "system"])
     .optional()
     .describe("Message kind. Default chat."),
-};
+});
 
-export const tellRoomSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session if set. Sender is this process."),
+export const tellRoomSchema = z.object({
+  session_id: joinedSessionField,
   room_id: z
     .string()
     .max(128)
@@ -114,15 +113,10 @@ export const tellRoomSchema = {
     .enum(["chat", "status", "task", "system"])
     .optional()
     .describe("Message kind. Default chat."),
-};
+});
 
-export const pullMessagesSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session if set. Reader is this process."),
+export const pullMessagesSchema = z.object({
+  session_id: joinedSessionField,
   room_id: z
     .string()
     .max(128)
@@ -146,44 +140,29 @@ export const pullMessagesSchema = {
     .max(200)
     .optional()
     .describe("Max messages to return. Default 50, max 200."),
-};
+});
 
-export const createRoomSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session if set. Creator is this process (added as a member)."),
+export const createRoomSchema = z.object({
+  session_id: joinedSessionField,
   room_id: z
     .string()
     .max(128)
     .regex(ID_PATTERN)
     .describe("New room id."),
   display_name: z.string().max(128).optional().describe("Optional display name."),
-};
+});
 
-export const joinRoomSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session if set. Joiner is this process."),
+export const joinRoomSchema = z.object({
+  session_id: joinedSessionField,
   room_id: z
     .string()
     .max(128)
     .regex(ID_PATTERN)
     .describe("Room to join."),
-};
+});
 
-export const memorySetSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session if set. Writer is this process."),
+export const memorySetSchema = z.object({
+  session_id: joinedSessionField,
   key: z
     .string()
     .min(1)
@@ -194,30 +173,20 @@ export const memorySetSchema = {
     .string()
     .max(32768)
     .describe("Memory value (shared fact, not a tool dump). Max 32k characters."),
-};
+});
 
-export const memoryGetSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
+export const memoryGetSchema = z.object({
+  session_id: inspectSessionField,
   key: z
     .string()
     .min(1)
     .max(256)
     .regex(ID_PATTERN)
     .describe("Memory key to read."),
-};
+});
 
-export const memoryListSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
+export const memoryListSchema = z.object({
+  session_id: inspectSessionField,
   include_values: z
     .boolean()
     .optional()
@@ -230,29 +199,19 @@ export const memoryListSchema = {
     .max(200)
     .optional()
     .describe("Max keys to return. Default 50, max 200."),
-};
+});
 
-export const memoryNoteSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session if set. Author is this process."),
+export const memoryNoteSchema = z.object({
+  session_id: joinedSessionField,
   body: z
     .string()
     .min(1)
     .max(8192)
     .describe("Append-only note body. Max 8k characters."),
-};
+});
 
-export const memoryNotesSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
+export const memoryNotesSchema = z.object({
+  session_id: inspectSessionField,
   cursor: z.string().max(128).optional().describe("Read notes after this note id."),
   limit: z
     .coerce.number()
@@ -261,16 +220,11 @@ export const memoryNotesSchema = {
     .max(200)
     .optional()
     .describe("Max notes to return. Default 50, max 200."),
-};
+});
 
-export const traceContextSchema = {
-  session_id: z
-    .string()
-    .max(128)
-    .regex(OPTIONAL_ID_PATTERN)
-    .optional()
-    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
-};
+export const traceContextSchema = z.object({
+  session_id: inspectSessionField,
+});
 
 const peerOutput = z.object({
   agent_id: z.string(),
@@ -294,31 +248,31 @@ const messageOutput = z.object({
   truncated: z.boolean().optional(),
 });
 
-export const joinSessionOutputSchema = {
+export const joinSessionOutputSchema = z.object({
   session_id: z.string(),
   agent_id: z.string(),
   namespace: z.string(),
   room_id: z.string(),
   peers: z.array(peerOutput),
   created: z.boolean(),
-};
+});
 
-export const leaveSessionOutputSchema = {
+export const leaveSessionOutputSchema = z.object({
   left: z.boolean(),
   session_id: z.string(),
   agent_id: z.string(),
-};
+});
 
-export const listPeersOutputSchema = {
+export const listPeersOutputSchema = z.object({
   session_id: z.string(),
   peers: z.array(peerOutput),
   peer_count: z.number(),
   online_count: z.number(),
   next_cursor: z.string().optional(),
   truncated: z.boolean(),
-};
+});
 
-export const sessionInfoOutputSchema = {
+export const sessionInfoOutputSchema = z.object({
   session_id: z.string(),
   namespace: z.string(),
   store: z.string(),
@@ -327,69 +281,69 @@ export const sessionInfoOutputSchema = {
   rooms_truncated: z.boolean(),
   created_at: z.string().optional(),
   created_by: z.string().optional(),
-};
+});
 
-export const tellAgentOutputSchema = {
+export const tellAgentOutputSchema = z.object({
   message_id: z.string(),
   pair: z.string(),
   session_id: z.string(),
-};
+});
 
-export const tellRoomOutputSchema = {
+export const tellRoomOutputSchema = z.object({
   message_id: z.string(),
   room_id: z.string(),
   session_id: z.string(),
-};
+});
 
-export const pullMessagesOutputSchema = {
+export const pullMessagesOutputSchema = z.object({
   session_id: z.string(),
   channel: z.string(),
   messages: z.array(messageOutput),
   next_cursor: z.string().optional(),
-  cursors: z.record(z.string()).optional(),
+  cursors: z.record(z.string(), z.string()).optional(),
   truncated: z.boolean(),
-};
+});
 
-export const createRoomOutputSchema = {
+export const createRoomOutputSchema = z.object({
   room_id: z.string(),
   created: z.boolean(),
   session_id: z.string(),
-};
+});
 
-export const joinRoomOutputSchema = {
+export const joinRoomOutputSchema = z.object({
   room_id: z.string(),
   members: z.number(),
   session_id: z.string(),
-};
+});
 
-export const memorySetOutputSchema = {
+export const memorySetOutputSchema = z.object({
   key: z.string(),
   session_id: z.string(),
-};
+});
 
-export const memoryGetOutputSchema = {
+export const memoryGetOutputSchema = z.object({
   key: z.string(),
   value: z.string().nullable(),
   found: z.boolean(),
   updated_at: z.string().optional(),
   updated_by: z.string().optional(),
   session_id: z.string(),
-};
+});
 
-export const memoryListOutputSchema = {
+export const memoryListOutputSchema = z.object({
   session_id: z.string(),
   keys: z.array(z.string()),
-  values: z.record(z.string()).optional(),
+  values: z.record(z.string(), z.string()).optional(),
   next_cursor: z.string().optional(),
   truncated: z.boolean(),
-};
+});
 
-export const memoryNoteOutputSchema = {
+export const memoryNoteOutputSchema = z.object({
   note_id: z.string(),
   session_id: z.string(),
-};
+});
 
-export const memoryNotesOutputSchema = {
+export const memoryNotesOutputSchema = z.object({
   session_id: z.string(),
   notes: z.array(
     z.object({
@@ -401,14 +355,14 @@ export const memoryNotesOutputSchema = {
   ),
   next_cursor: z.string().optional(),
   truncated: z.boolean(),
-};
+});
 
-export const traceContextOutputSchema = {
+export const traceContextOutputSchema = z.object({
   session_id: z.string(),
   conversation_id: z.string(),
   traceparent: z.string().nullable(),
   namespace: z.string(),
-};
+});
 
 export const ALL_TOOL_OUTPUT_SCHEMAS = {
   join_session: joinSessionOutputSchema,
@@ -446,13 +400,13 @@ export const ALL_TOOL_SCHEMAS = {
   trace_context: traceContextSchema,
 } as const;
 
-const SECRET_FIELD = /password|redis_url|redis_host|redis_user|secret|credential/i;
+const SECRET_FIELD = /password|redis_url|redis_host|redis_user|secret|credential|join_token|token/i;
 
-export function schemaHasSecretFields(shape: Record<string, unknown>): string[] {
-  return Object.keys(shape).filter((k) => SECRET_FIELD.test(k));
+export function schemaHasSecretFields(schema: z.ZodObject): string[] {
+  return Object.keys(schema.shape).filter((k) => SECRET_FIELD.test(k));
 }
 
 /** Claude Code rejects top-level properties outside 1–64 ASCII [A-Za-z0-9_.-]. */
-export function schemaPropertyNameIssues(shape: Record<string, unknown>): string[] {
-  return Object.keys(shape).filter((k) => !CLAUDE_CODE_PROPERTY_NAME.test(k));
+export function schemaPropertyNameIssues(schema: z.ZodObject): string[] {
+  return Object.keys(schema.shape).filter((k) => !CLAUDE_CODE_PROPERTY_NAME.test(k));
 }

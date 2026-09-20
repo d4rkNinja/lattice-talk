@@ -127,31 +127,48 @@ describe("MemoryStore session bus", () => {
     expect(pulled.messages[0]?.body).toBe("wireframes up");
   });
 
-  it("authorizes the join token from env only — no tool argument exists", async () => {
+  it("fixes the token policy at session creation and enforces it on later joins", async () => {
     const store = new MemoryStore("test");
     const first = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "secret" }));
     const joined = await joinSession(first, { session_id: "s1", role: "fe", agent_id: "fe" });
-    expect(joined.agent_id).toBe("fe");
+    expect(joined.created).toBe(true);
+
+    const meta = await store.getSessionMeta("s1");
+    expect(meta?.join_policy).toBe("token");
+    expect(meta?.join_token_hash).toBe(
+      (await import("node:crypto")).createHash("sha256").update("secret").digest("hex"),
+    );
 
     const wrong = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "wrong" }));
     await expect(
       joinSession(wrong, { session_id: "s1", role: "be" }),
     ).rejects.toMatchObject({ code: "auth" });
 
+    const tokenless = makeDeps(store);
+    await expect(
+      joinSession(tokenless, { session_id: "s1", role: "be" }),
+    ).rejects.toMatchObject({ code: "auth" });
+
     const right = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "secret" }));
     const ok = await joinSession(right, { session_id: "s1", role: "be" });
     expect(ok.agent_id).toBeTruthy();
-
-    const storedHash = await store.getJoinTokenHash("s1");
-    expect(storedHash).toBe((await import("node:crypto")).createHash("sha256").update("secret").digest("hex"));
   });
 
-  it("stays open when no join token is configured", async () => {
+  it("never lets a token retroactively lock an open session", async () => {
     const store = new MemoryStore("test");
-    const deps = makeDeps(store);
-    const joined = await joinSession(deps, { session_id: "s1", role: "fe" });
-    expect(joined.created).toBe(true);
-    expect(await store.getJoinTokenHash("s1")).toBeNull();
+    const creator = makeDeps(store);
+    await joinSession(creator, { session_id: "s1", role: "fe", agent_id: "fe" });
+    expect((await store.getSessionMeta("s1"))?.join_policy).toBe("open");
+
+    // A later token-bearing process cannot claim or lock the open session.
+    const tokened = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "secret" }));
+    const joined = await joinSession(tokened, { session_id: "s1", role: "be" });
+    expect(joined.agent_id).toBeTruthy();
+    expect((await store.getSessionMeta("s1"))?.join_policy).toBe("open");
+
+    // And tokenless participants are still welcome.
+    const late = makeDeps(store);
+    await expect(joinSession(late, { session_id: "s1", role: "reviewer" })).resolves.toBeTruthy();
   });
 
   it("expires presence after TTL", async () => {

@@ -1,4 +1,4 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { BusDeps } from "../core/types.js";
 import { withSpan, type SpanAttrs } from "../otel/setup.js";
 import { toolCaught } from "./result.js";

@@ -1,5 +1,5 @@
-import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { completable } from "@modelcontextprotocol/server";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { BusDeps } from "../core/types.js";
 import { PACKAGE_NAME } from "../version.js";
@@ -27,10 +27,10 @@ export function registerPrompts(server: McpServer, deps: BusDeps): void {
       title: "Join a Lattice session",
       description:
         "Start using this stdio MCP bus: join a shared session_id, then inspect peers and the session resource.",
-      argsSchema: {
+      argsSchema: z.object({
         session_id: sessionIdArg(deps),
         role: z.string().describe("This agent's role, e.g. frontend, backend, reviewer."),
-      },
+      }),
     },
     ({ session_id, role }) => {
       const sid = session_id?.trim() || deps.ctx.sessionId || deps.config.defaultSessionId || "<session_id>";
@@ -62,11 +62,11 @@ export function registerPrompts(server: McpServer, deps: BusDeps): void {
       title: "Two-agent / two-machine handoff",
       description:
         "Same session_id on two harnesses or machines. Requires Redis (LATTICE_STORE=memory is one process only).",
-      argsSchema: {
+      argsSchema: z.object({
         session_id: sessionIdArg(deps),
         my_role: z.string().describe("Role for this agent, e.g. frontend."),
         other_role: z.string().optional().describe("Expected peer role, e.g. backend."),
-      },
+      }),
     },
     ({ session_id, my_role, other_role }) => {
       const sid = session_id?.trim() || deps.ctx.sessionId || deps.config.defaultSessionId || "demo-1";
@@ -99,13 +99,13 @@ export function registerPrompts(server: McpServer, deps: BusDeps): void {
     {
       title: "Pull messages and reply",
       description: "Read new room or inbox messages since the cursor, then reply.",
-      argsSchema: {
+      argsSchema: z.object({
         session_id: sessionIdArg(deps),
         inbox: z
           .string()
           .optional()
           .describe("Set true to pull DMs instead of the main room."),
-      },
+      }),
     },
     ({ session_id, inbox }) => {
       const sid = session_id?.trim() || deps.ctx.sessionId || deps.config.defaultSessionId || "<session_id>";

@@ -8,6 +8,7 @@ export interface Store {
   readonly kind: "redis" | "memory";
 
   getSessionMeta(sessionId: string): Promise<SessionMeta | null>;
+  /** Atomic create-or-lose: writes the full meta (including join policy) only if absent. */
   initSessionMeta(sessionId: string, meta: SessionMeta): Promise<boolean>;
   putAgent(sessionId: string, agent: AgentRecord): Promise<void>;
   getAgent(sessionId: string, agentId: string): Promise<AgentRecord | null>;
@@ -17,9 +18,12 @@ export interface Store {
   countAgents(sessionId: string): Promise<number>;
   removeAgent(sessionId: string, agentId: string): Promise<void>;
 
-  getJoinTokenHash(sessionId: string): Promise<string | null>;
-  /** Set-once (SETNX). Returns false when a hash is already stored. */
-  initJoinTokenHash(sessionId: string, hash: string): Promise<boolean>;
+  /**
+   * Drop everything tied to one agent's presence in the session beyond the
+   * agent record and room memberships: read cursors and DM partner lists.
+   * Keeps a reused agent_id from inheriting a previous occupant's state.
+   */
+  clearAgentState(sessionId: string, agentId: string): Promise<void>;
 
   touchPresence(sessionId: string, agentId: string, ttlSeconds: number): Promise<void>;
   clearPresence(sessionId: string, agentId: string): Promise<void>;
