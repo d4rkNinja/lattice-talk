@@ -95,6 +95,7 @@ describe.skipIf(!existsSync(distEntry))("built stdio MCP server", () => {
         "memory_get",
         "memory_list",
         "memory_note",
+        "memory_notes",
         "memory_set",
         "pull_messages",
         "session_info",

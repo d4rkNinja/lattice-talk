@@ -1,32 +1,44 @@
 import { z } from "zod";
 import { CLAUDE_CODE_PROPERTY_NAME } from "./instructions.js";
 
-/** Flat Zod shapes — no root anyOf/oneOf/allOf. ASCII names. No Redis credential fields. */
+/** Flat Zod shapes — no root anyOf/oneOf/allOf. ASCII names. No secrets. */
+
+/** Public ids: letters, digits, and . _ - (no ':' — composite keys join with ':'). */
+const ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+/** Optional-id variant that still lets an empty string fall through to core fallbacks. */
+const OPTIONAL_ID_PATTERN = /^[A-Za-z0-9._-]*$/;
 
 export const joinSessionSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Session to join. Falls back to last join or LATTICE_DEFAULT_SESSION_ID."),
-  role: z.string().describe("This agent's role, e.g. frontend, backend, reviewer."),
+  role: z
+    .string()
+    .min(1)
+    .max(64)
+    .describe("This agent's role, e.g. frontend, backend, reviewer."),
   agent_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Optional self-id at join only. Generated if omitted; reused from this process after join."),
   harness: z
     .string()
+    .max(64)
     .optional()
     .describe("Harness name: claude-code, cursor, codex, custom."),
-  display_name: z.string().optional().describe("Human-readable name shown to peers."),
-  join_token: z
-    .string()
-    .optional()
-    .describe("Required only when the server set LATTICE_JOIN_TOKEN. Never a Redis password."),
+  display_name: z.string().max(128).optional().describe("Human-readable name shown to peers."),
 };
 
 export const leaveSessionSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. This process leaves; you cannot kick another agent."),
 };
@@ -34,9 +46,11 @@ export const leaveSessionSchema = {
 export const listPeersSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
-  cursor: z.string().optional().describe("Paginate after this agent_id (sorted)."),
+  cursor: z.string().max(256).optional().describe("Paginate after this agent_id (sorted)."),
   limit: z
     .coerce.number()
     .int()
@@ -49,6 +63,8 @@ export const listPeersSchema = {
 export const sessionInfoSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
 };
@@ -56,10 +72,20 @@ export const sessionInfoSchema = {
 export const tellAgentSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. Sender is this process."),
-  to_agent_id: z.string().describe("Recipient agent id in this session."),
-  body: z.string().describe("Message body."),
+  to_agent_id: z
+    .string()
+    .max(128)
+    .regex(ID_PATTERN)
+    .describe("Recipient agent id in this session."),
+  body: z
+    .string()
+    .min(1)
+    .max(16384)
+    .describe("Message body. Over ~2k characters is truncated on read."),
   kind: z
     .enum(["chat", "status", "task", "system"])
     .optional()
@@ -69,10 +95,21 @@ export const tellAgentSchema = {
 export const tellRoomSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. Sender is this process."),
-  room_id: z.string().optional().describe("Room to broadcast. Default main. Caller must be a member."),
-  body: z.string().describe("Message body."),
+  room_id: z
+    .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
+    .optional()
+    .describe("Room to broadcast. Default main. Caller must be a member."),
+  body: z
+    .string()
+    .min(1)
+    .max(16384)
+    .describe("Message body. Over ~2k characters is truncated on read."),
   kind: z
     .enum(["chat", "status", "task", "system"])
     .optional()
@@ -82,10 +119,14 @@ export const tellRoomSchema = {
 export const pullMessagesSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. Reader is this process."),
   room_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Room to read (default main). Caller must be a member. Use inbox to pull DMs instead."),
   inbox: z
@@ -94,6 +135,8 @@ export const pullMessagesSchema = {
     .describe("If true, pull this process's DM inbox (all pair streams, or one if other_agent_id is set)."),
   other_agent_id: z
     .string()
+    .max(128)
+    .regex(ID_PATTERN)
     .optional()
     .describe("When pulling inbox, only this DM pair. Does not change who is reading."),
   limit: z
@@ -108,47 +151,78 @@ export const pullMessagesSchema = {
 export const createRoomSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. Creator is this process (added as a member)."),
-  room_id: z.string().describe("New room id."),
-  display_name: z.string().optional().describe("Optional display name."),
+  room_id: z
+    .string()
+    .max(128)
+    .regex(ID_PATTERN)
+    .describe("New room id."),
+  display_name: z.string().max(128).optional().describe("Optional display name."),
 };
 
 export const joinRoomSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. Joiner is this process."),
-  room_id: z.string().describe("Room to join."),
+  room_id: z
+    .string()
+    .max(128)
+    .regex(ID_PATTERN)
+    .describe("Room to join."),
 };
 
 export const memorySetSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. Writer is this process."),
-  key: z.string().describe("Memory key."),
-  value: z.string().describe("Memory value (shared fact, not a tool dump)."),
+  key: z
+    .string()
+    .min(1)
+    .max(256)
+    .regex(ID_PATTERN)
+    .describe("Memory key (letters, digits, . _ -)."),
+  value: z
+    .string()
+    .max(32768)
+    .describe("Memory value (shared fact, not a tool dump). Max 32k characters."),
 };
 
 export const memoryGetSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
-  key: z.string().describe("Memory key to read."),
+  key: z
+    .string()
+    .min(1)
+    .max(256)
+    .regex(ID_PATTERN)
+    .describe("Memory key to read."),
 };
 
 export const memoryListSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
   include_values: z
     .boolean()
     .optional()
     .describe("If true, include short value previews."),
-  cursor: z.string().optional().describe("Paginate after this key (sorted)."),
+  cursor: z.string().max(256).optional().describe("Paginate after this key (sorted)."),
   limit: z
     .coerce.number()
     .int()
@@ -161,14 +235,39 @@ export const memoryListSchema = {
 export const memoryNoteSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session if set. Author is this process."),
-  body: z.string().describe("Append-only note body."),
+  body: z
+    .string()
+    .min(1)
+    .max(8192)
+    .describe("Append-only note body. Max 8k characters."),
+};
+
+export const memoryNotesSchema = {
+  session_id: z
+    .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
+    .optional()
+    .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
+  cursor: z.string().max(128).optional().describe("Read notes after this note id."),
+  limit: z
+    .coerce.number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Max notes to return. Default 50, max 200."),
 };
 
 export const traceContextSchema = {
   session_id: z
     .string()
+    .max(128)
+    .regex(OPTIONAL_ID_PATTERN)
     .optional()
     .describe("Must match the joined session or LATTICE_DEFAULT_SESSION_ID."),
 };
@@ -272,6 +371,8 @@ export const memoryGetOutputSchema = {
   key: z.string(),
   value: z.string().nullable(),
   found: z.boolean(),
+  updated_at: z.string().optional(),
+  updated_by: z.string().optional(),
   session_id: z.string(),
 };
 
@@ -286,6 +387,20 @@ export const memoryListOutputSchema = {
 export const memoryNoteOutputSchema = {
   note_id: z.string(),
   session_id: z.string(),
+};
+
+export const memoryNotesOutputSchema = {
+  session_id: z.string(),
+  notes: z.array(
+    z.object({
+      id: z.string(),
+      from: z.string(),
+      body: z.string(),
+      ts: z.string(),
+    }),
+  ),
+  next_cursor: z.string().optional(),
+  truncated: z.boolean(),
 };
 
 export const traceContextOutputSchema = {
@@ -309,6 +424,7 @@ export const ALL_TOOL_OUTPUT_SCHEMAS = {
   memory_get: memoryGetOutputSchema,
   memory_list: memoryListOutputSchema,
   memory_note: memoryNoteOutputSchema,
+  memory_notes: memoryNotesOutputSchema,
   trace_context: traceContextOutputSchema,
 } as const;
 
@@ -326,6 +442,7 @@ export const ALL_TOOL_SCHEMAS = {
   memory_get: memoryGetSchema,
   memory_list: memoryListSchema,
   memory_note: memoryNoteSchema,
+  memory_notes: memoryNotesSchema,
   trace_context: traceContextSchema,
 } as const;
 

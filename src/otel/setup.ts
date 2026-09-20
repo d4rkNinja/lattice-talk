@@ -24,6 +24,7 @@ import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type { LatticeConfig } from "../core/config.js";
 import { log } from "../log.js";
+import { PACKAGE_VERSION } from "../version.js";
 
 export interface OtelHandle {
   enabled: boolean;
@@ -127,7 +128,7 @@ export function setupOtel(
 }
 
 export function getTracer(): Tracer {
-  return trace.getTracer("lattice-talk", "1.0.0");
+  return trace.getTracer("lattice-talk", PACKAGE_VERSION);
 }
 
 export function currentTraceparent(): string | undefined {

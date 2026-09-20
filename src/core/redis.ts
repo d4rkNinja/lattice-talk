@@ -51,6 +51,33 @@ function parseAgent(raw: string): AgentRecord | null {
   }
 }
 
+/**
+ * Session creation as one atomic step: claim session_id, and only the winner
+ * writes the remaining metadata. Concurrent creators can never expose a
+ * half-initialized session hash.
+ */
+const INIT_SESSION_META_LUA = `
+if redis.call('HSETNX', KEYS[1], 'session_id', ARGV[1]) == 1 then
+  redis.call('HSET', KEYS[1], 'namespace', ARGV[2], 'created_at', ARGV[3], 'created_by', ARGV[4])
+  return 1
+end
+return 0
+`;
+
+/**
+ * Room creation as one atomic step: register the room id and make sure the
+ * metadata hash exists, so listRooms and getRoomMeta can never disagree.
+ */
+const ADD_ROOM_LUA = `
+local added = redis.call('SADD', KEYS[1], ARGV[1])
+if redis.call('EXISTS', KEYS[2]) == 0 then
+  redis.call('HSET', KEYS[2],
+    'room_id', ARGV[1], 'session_id', ARGV[2],
+    'display_name', ARGV[3], 'created_at', ARGV[4], 'created_by', ARGV[5])
+end
+return added
+`;
+
 export function createRedisClient(config: LatticeConfig): Redis {
   const common = {
     maxRetriesPerRequest: 3,
@@ -112,17 +139,16 @@ export class RedisStore implements Store {
   }
 
   async initSessionMeta(sessionId: string, meta: SessionMeta): Promise<boolean> {
-    const key = keys.sessionMeta(this.ns, sessionId);
-    const created = await this.redis.hsetnx(key, "session_id", meta.session_id);
-    if (created === 1) {
-      await this.redis.hset(key, {
-        namespace: meta.namespace,
-        created_at: meta.created_at,
-        created_by: meta.created_by,
-      });
-      return true;
-    }
-    return false;
+    const created = await this.redis.eval(
+      INIT_SESSION_META_LUA,
+      1,
+      keys.sessionMeta(this.ns, sessionId),
+      meta.session_id,
+      meta.namespace,
+      meta.created_at,
+      meta.created_by,
+    );
+    return created === 1;
   }
 
   async putAgent(sessionId: string, agent: AgentRecord): Promise<void> {
@@ -169,8 +195,13 @@ export class RedisStore implements Store {
     return this.redis.get(keys.sessionJoin(this.ns, sessionId));
   }
 
-  async setJoinTokenHash(sessionId: string, hash: string): Promise<void> {
-    await this.redis.set(keys.sessionJoin(this.ns, sessionId), hash);
+  async initJoinTokenHash(sessionId: string, hash: string): Promise<boolean> {
+    const result = await this.redis.set(
+      keys.sessionJoin(this.ns, sessionId),
+      hash,
+      "NX",
+    );
+    return result === "OK";
   }
 
   async touchPresence(sessionId: string, agentId: string, ttlSeconds: number): Promise<void> {
@@ -200,29 +231,18 @@ export class RedisStore implements Store {
   }
 
   async addRoom(sessionId: string, roomId: string, meta: RoomMeta): Promise<boolean> {
-    const added = await this.redis.sadd(keys.sessionRooms(this.ns, sessionId), roomId);
-    const key = keys.roomMeta(this.ns, sessionId, roomId);
-    if (added === 1) {
-      await this.redis.hset(key, {
-        room_id: meta.room_id,
-        session_id: meta.session_id,
-        display_name: meta.display_name,
-        created_at: meta.created_at,
-        created_by: meta.created_by,
-      });
-      return true;
-    }
-    const exists = await this.redis.exists(key);
-    if (exists === 0) {
-      await this.redis.hset(key, {
-        room_id: meta.room_id,
-        session_id: meta.session_id,
-        display_name: meta.display_name,
-        created_at: meta.created_at,
-        created_by: meta.created_by,
-      });
-    }
-    return false;
+    const added = await this.redis.eval(
+      ADD_ROOM_LUA,
+      2,
+      keys.sessionRooms(this.ns, sessionId),
+      keys.roomMeta(this.ns, sessionId, roomId),
+      meta.room_id,
+      meta.session_id,
+      meta.display_name,
+      meta.created_at,
+      meta.created_by,
+    );
+    return added === 1;
   }
 
   async listRooms(sessionId: string): Promise<string[]> {
@@ -339,6 +359,10 @@ export class RedisStore implements Store {
     return this.redis.hget(keys.memoryKv(this.ns, sessionId), key);
   }
 
+  async memoryGetMeta(sessionId: string, key: string): Promise<Record<string, string>> {
+    return this.redis.hgetall(keys.memoryMeta(this.ns, sessionId, key));
+  }
+
   async memoryKeys(sessionId: string): Promise<string[]> {
     return this.redis.hkeys(keys.memoryKv(this.ns, sessionId));
   }
@@ -365,10 +389,6 @@ export class RedisStore implements Store {
 
   async readNotes(sessionId: string, afterId: string, limit: number): Promise<StreamEntry[]> {
     return this.readStreamAfter(keys.memoryNotes(this.ns, sessionId), afterId, limit);
-  }
-
-  async publishWake(sessionId: string, payload: string): Promise<void> {
-    await this.redis.publish(keys.wake(this.ns, sessionId), payload);
   }
 
   async ping(): Promise<boolean> {

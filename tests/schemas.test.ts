@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   CLAUDE_CODE_DESCRIPTION_LIMIT_CHARS,
   CLAUDE_CODE_INSTRUCTION_LIMIT_CHARS,
@@ -7,8 +8,11 @@ import {
 import {
   ALL_TOOL_OUTPUT_SCHEMAS,
   ALL_TOOL_SCHEMAS,
+  joinSessionSchema,
+  memoryNoteSchema,
   schemaHasSecretFields,
   schemaPropertyNameIssues,
+  tellAgentSchema,
 } from "../src/mcp/schemas.js";
 
 describe("tool schemas", () => {
@@ -28,6 +32,7 @@ describe("tool schemas", () => {
       "memory_get",
       "memory_list",
       "memory_note",
+      "memory_notes",
       "trace_context",
     ]);
 
@@ -45,6 +50,9 @@ describe("tool schemas", () => {
       } else {
         expect("agent_id" in shape, name).toBe(false);
       }
+      // No tool takes a secret: join tokens live in env only.
+      expect("join_token" in shape, name).toBe(false);
+      expect("token" in shape, name).toBe(false);
     }
 
     expect(Object.keys(ALL_TOOL_OUTPUT_SCHEMAS)).toEqual(names);
@@ -53,6 +61,23 @@ describe("tool schemas", () => {
       expect(shape && typeof shape === "object", name).toBe(true);
       expect("anyOf" in shape || "oneOf" in shape || "allOf" in shape, name).toBe(false);
     }
+  });
+
+  it("bounds free-text and id fields at the schema layer", () => {
+    const join = z.object(joinSessionSchema);
+    expect(join.safeParse({ role: "x".repeat(65) }).success).toBe(false);
+    expect(join.safeParse({ role: "frontend" }).success).toBe(true);
+    expect(join.safeParse({ role: "fe", agent_id: "bad:id" }).success).toBe(false);
+    expect(join.safeParse({ role: "fe", agent_id: "ok.id_1-x" }).success).toBe(true);
+
+    const tell = z.object(tellAgentSchema);
+    expect(tell.safeParse({ to_agent_id: "bad:id", body: "hi" }).success).toBe(false);
+    expect(tell.safeParse({ to_agent_id: "be", body: "x".repeat(16385) }).success).toBe(false);
+    expect(tell.safeParse({ to_agent_id: "be", body: "hi" }).success).toBe(true);
+
+    const note = z.object(memoryNoteSchema);
+    expect(note.safeParse({ body: "x".repeat(8193) }).success).toBe(false);
+    expect(note.safeParse({ body: "note" }).success).toBe(true);
   });
 
   it("keeps server instructions and schema descriptions under Claude Code 2KB caps", () => {

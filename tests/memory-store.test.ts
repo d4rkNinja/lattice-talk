@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { UserError } from "../src/core/errors.js";
 import { memoryGet, memoryList, memoryNote, memorySet } from "../src/core/memory.js";
 import { MemoryStore } from "../src/core/memory-store.js";
 import { pullMessages, tellAgent, tellRoom, truncateBody } from "../src/core/messages.js";
@@ -128,21 +127,31 @@ describe("MemoryStore session bus", () => {
     expect(pulled.messages[0]?.body).toBe("wireframes up");
   });
 
-  it("requires a matching join token when configured", async () => {
+  it("authorizes the join token from env only — no tool argument exists", async () => {
     const store = new MemoryStore("test");
-    const deps = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "secret" }));
+    const first = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "secret" }));
+    const joined = await joinSession(first, { session_id: "s1", role: "fe", agent_id: "fe" });
+    expect(joined.agent_id).toBe("fe");
+
+    const wrong = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "wrong" }));
     await expect(
-      joinSession(deps, { session_id: "s1", role: "fe" }),
-    ).rejects.toBeInstanceOf(UserError);
-    await expect(
-      joinSession(deps, { session_id: "s1", role: "fe", join_token: "wrong" }),
+      joinSession(wrong, { session_id: "s1", role: "be" }),
     ).rejects.toMatchObject({ code: "auth" });
-    const ok = await joinSession(deps, {
-      session_id: "s1",
-      role: "fe",
-      join_token: "secret",
-    });
+
+    const right = makeDeps(store, testConfig({ LATTICE_JOIN_TOKEN: "secret" }));
+    const ok = await joinSession(right, { session_id: "s1", role: "be" });
     expect(ok.agent_id).toBeTruthy();
+
+    const storedHash = await store.getJoinTokenHash("s1");
+    expect(storedHash).toBe((await import("node:crypto")).createHash("sha256").update("secret").digest("hex"));
+  });
+
+  it("stays open when no join token is configured", async () => {
+    const store = new MemoryStore("test");
+    const deps = makeDeps(store);
+    const joined = await joinSession(deps, { session_id: "s1", role: "fe" });
+    expect(joined.created).toBe(true);
+    expect(await store.getJoinTokenHash("s1")).toBeNull();
   });
 
   it("expires presence after TTL", async () => {

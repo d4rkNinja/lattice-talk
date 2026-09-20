@@ -44,9 +44,10 @@ export function resolveSessionId(deps: BusDeps, explicit?: string): string {
 }
 
 /**
- * Read-only inspection (session_info, list_peers, memory_get/list, trace_context).
- * Omitted → joined session or LATTICE_DEFAULT_SESSION_ID.
- * Provided session_id must match one of those two — never an arbitrary session.
+ * Read-only inspection (session_info, list_peers, memory_get/list/notes,
+ * trace_context, resources). Omitted → joined session or
+ * LATTICE_DEFAULT_SESSION_ID. Provided session_id must match one of those
+ * two — never an arbitrary session.
  */
 export function resolveInspectSessionId(deps: BusDeps, explicit?: string): string {
   const joined = deps.ctx.sessionId;
@@ -65,16 +66,4 @@ export function resolveInspectSessionId(deps: BusDeps, explicit?: string): strin
   throw new UserError(
     "session_id must match the joined session or LATTICE_DEFAULT_SESSION_ID.",
   );
-}
-
-/**
- * Core helpers that also serve resources: an explicit session_id is trusted
- * (resources already proved the session exists). Otherwise inspect rules apply.
- */
-export function resolveProvidedOrInspectSessionId(deps: BusDeps, explicit?: string): string {
-  const raw = explicit?.trim();
-  if (raw) {
-    return assertId(raw, "session_id");
-  }
-  return resolveInspectSessionId(deps);
 }

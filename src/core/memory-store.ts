@@ -131,8 +131,11 @@ export class MemoryStore implements Store {
     return this.readString(keys.sessionJoin(this.ns, sessionId));
   }
 
-  async setJoinTokenHash(sessionId: string, hash: string): Promise<void> {
-    this.strings.set(keys.sessionJoin(this.ns, sessionId), { value: hash });
+  async initJoinTokenHash(sessionId: string, hash: string): Promise<boolean> {
+    const key = keys.sessionJoin(this.ns, sessionId);
+    if (this.readString(key) !== null) return false;
+    this.strings.set(key, { value: hash });
+    return true;
   }
 
   async touchPresence(sessionId: string, agentId: string, ttlSeconds: number): Promise<void> {
@@ -280,6 +283,11 @@ export class MemoryStore implements Store {
     return this.hashes.get(keys.memoryKv(this.ns, sessionId))?.get(key) ?? null;
   }
 
+  async memoryGetMeta(sessionId: string, key: string): Promise<Record<string, string>> {
+    const h = this.hashes.get(keys.memoryMeta(this.ns, sessionId, key));
+    return h ? Object.fromEntries(h.entries()) : {};
+  }
+
   async memoryKeys(sessionId: string): Promise<string[]> {
     const h = this.hashes.get(keys.memoryKv(this.ns, sessionId));
     return h ? [...h.keys()] : [];
@@ -307,10 +315,6 @@ export class MemoryStore implements Store {
 
   async readNotes(sessionId: string, afterId: string, limit: number): Promise<StreamEntry[]> {
     return this.readStreamAfter(keys.memoryNotes(this.ns, sessionId), afterId, limit);
-  }
-
-  async publishWake(_sessionId: string, _payload: string): Promise<void> {
-    // no-op — single process, pull is the v1 read model
   }
 
   async ping(): Promise<boolean> {

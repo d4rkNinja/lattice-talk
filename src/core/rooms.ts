@@ -1,6 +1,6 @@
 import { UserError } from "./errors.js";
-import { assertId } from "./ids.js";
-import { DEFAULT_ROOM } from "./limits.js";
+import { assertBoundedText, assertId } from "./ids.js";
+import { DEFAULT_ROOM, DISPLAY_NAME_MAX_CHARS } from "./limits.js";
 import { requireJoinedSession } from "./resolve.js";
 import type { BusDeps, RoomMeta } from "./types.js";
 
@@ -35,7 +35,9 @@ export async function ensureRoom(
   const meta: RoomMeta = {
     room_id: rid,
     session_id: sessionId,
-    display_name: displayName?.trim() || rid,
+    display_name: displayName
+      ? assertBoundedText(displayName, "display_name", DISPLAY_NAME_MAX_CHARS)
+      : rid,
     created_at: nowIso(),
     created_by: createdBy,
   };

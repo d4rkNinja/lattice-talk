@@ -50,9 +50,6 @@ export const keys = {
   cursor(ns: string, sid: string, agentId: string, rid: string): string {
     return `lattice:${ns}:cursor:${sessionTag(sid)}:${agentId}:${rid}`;
   },
-  wake(ns: string, sid: string): string {
-    return `lattice:${ns}:wake:${sessionTag(sid)}`;
-  },
   memoryKv(ns: string, sid: string): string {
     return `lattice:${ns}:memory:${sessionTag(sid)}:kv`;
   },

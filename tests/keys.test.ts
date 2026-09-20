@@ -22,7 +22,6 @@ describe("key builders", () => {
     );
     expect(keys.dmStream(ns, sid, "a:b")).toBe("lattice:dev:stream:session:{abc}:dm:a:b");
     expect(keys.cursor(ns, sid, "a1", "main")).toBe("lattice:dev:cursor:{abc}:a1:main");
-    expect(keys.wake(ns, sid)).toBe("lattice:dev:wake:{abc}");
     expect(keys.memoryKv(ns, sid)).toBe("lattice:dev:memory:{abc}:kv");
     expect(keys.memoryNotes(ns, sid)).toBe("lattice:dev:memory:{abc}:notes");
     expect(keys.memoryMeta(ns, sid, "api")).toBe("lattice:dev:memory:{abc}:meta:api");

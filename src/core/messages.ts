@@ -121,10 +121,6 @@ export async function tellRoom(
     fields,
     deps.config.streamMaxLen,
   );
-  await deps.store.publishWake(
-    sessionId,
-    JSON.stringify({ type: "room", room_id: roomId, message_id: messageId }),
-  );
   return { message_id: messageId, room_id: roomId, session_id: sessionId };
 }
 
@@ -162,10 +158,6 @@ export async function tellAgent(
     fields,
     deps.config.streamMaxLen,
   );
-  await deps.store.publishWake(
-    sessionId,
-    JSON.stringify({ type: "dm", pair, message_id: messageId }),
-  );
   return { message_id: messageId, pair, session_id: sessionId };
 }
 
@@ -185,16 +177,20 @@ async function pullOneStream(
   rid: string,
   streamKey: string,
   limit: number,
-): Promise<{ messages: LatticeMessage[]; next_cursor?: string }> {
+): Promise<{ messages: LatticeMessage[]; next_cursor?: string; truncated: boolean }> {
   const cursor = (await deps.store.getCursor(sessionId, agentId, rid)) ?? "0-0";
-  const entries = await deps.store.readStreamAfter(streamKey, cursor, limit);
-  const messages = entries.map(parseStreamMessage);
+  // Read one extra entry so truncated is exact: true only when something
+  // actually remains beyond this page.
+  const entries = await deps.store.readStreamAfter(streamKey, cursor, limit + 1);
+  const truncated = entries.length > limit;
+  const page = truncated ? entries.slice(0, limit) : entries;
+  const messages = page.map(parseStreamMessage);
   if (messages.length > 0) {
     const next = messages[messages.length - 1]!.id;
     await deps.store.setCursor(sessionId, agentId, rid, next);
-    return { messages, next_cursor: next };
+    return { messages, next_cursor: next, truncated };
   }
-  return { messages, next_cursor: cursor === "0-0" ? undefined : cursor };
+  return { messages, next_cursor: cursor === "0-0" ? undefined : cursor, truncated };
 }
 
 export async function pullMessages(
@@ -225,7 +221,7 @@ export async function pullMessages(
   }
   await assertRoomMember(deps, sessionId, roomId, agentId);
   const streamKey = keys.roomStream(deps.config.namespace, sessionId, roomId);
-  const { messages, next_cursor } = await pullOneStream(
+  const { messages, next_cursor, truncated } = await pullOneStream(
     deps,
     sessionId,
     agentId,
@@ -238,7 +234,7 @@ export async function pullMessages(
     channel: `room:${roomId}`,
     messages,
     next_cursor,
-    truncated: messages.length >= limit,
+    truncated,
   };
 }
 
@@ -259,13 +255,14 @@ async function pullInbox(
     const rid = dmCursorRid(pair);
     const streamKey = keys.dmStream(deps.config.namespace, sessionId, pair);
     const cursor = (await deps.store.getCursor(sessionId, agentId, rid)) ?? "0-0";
-    const entries = await deps.store.readStreamAfter(streamKey, cursor, limit);
+    const entries = await deps.store.readStreamAfter(streamKey, cursor, limit + 1);
     for (const entry of entries) {
       collected.push({ rid, pair, msg: parseStreamMessage(entry) });
     }
   }
 
   collected.sort((a, b) => compareStreamIds(a.msg.id, b.msg.id));
+  const truncated = collected.length > limit;
   const sliced = collected.slice(0, limit);
   const cursors: Record<string, string> = {};
   for (const item of sliced) {
@@ -284,6 +281,6 @@ async function pullInbox(
     messages: sliced.map((x) => x.msg),
     next_cursor: last?.msg.id,
     cursors: Object.keys(cursors).length > 0 ? cursors : undefined,
-    truncated: collected.length > sliced.length || sliced.length >= limit,
+    truncated,
   };
 }

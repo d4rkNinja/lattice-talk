@@ -21,6 +21,7 @@ const EXPECTED_TOOLS = [
   "memory_get",
   "memory_list",
   "memory_note",
+  "memory_notes",
   "memory_set",
   "pull_messages",
   "session_info",
@@ -34,6 +35,7 @@ const READ_ONLY = new Set([
   "session_info",
   "memory_get",
   "memory_list",
+  "memory_notes",
   "trace_context",
 ]);
 
@@ -64,7 +66,7 @@ describe("Claude Code MCP contract", () => {
     expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
   });
 
-  it("lists 14 tools with flat, ASCII, secret-free input schemas and annotations", async () => {
+  it("lists 15 tools with flat, ASCII, secret-free input schemas and annotations", async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((t) => t.name).sort();
     expect(names).toEqual([...EXPECTED_TOOLS].sort());
@@ -116,7 +118,7 @@ describe("Claude Code MCP contract", () => {
     expect(caps?.prompts?.listChanged).toBeFalsy();
   });
 
-  it("returns tool errors instead of crashing on bad input", async () => {
+  it("rejects schema-invalid input as a protocol error (-32602)", async () => {
     const result = await client.callTool({
       name: "join_session",
       arguments: { role: "" },
@@ -124,6 +126,17 @@ describe("Claude Code MCP contract", () => {
     expect(result.isError).toBe(true);
     const text = (result.content as { type: string; text?: string }[])[0]?.text ?? "";
     expect(text).toMatch(/role/i);
+  });
+
+  it("returns tool errors instead of crashing on business-rule violations", async () => {
+    // Whitespace passes the schema (min length 1) but fails core validation,
+    // so it must come back as an isError tool result, not a JSON-RPC error.
+    const result = await client.callTool({
+      name: "join_session",
+      arguments: { role: "   " },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as { type: string; text?: string }[])[0]?.text ?? "";
     const parsed = JSON.parse(text) as { error: string };
     expect(parsed.error).toMatch(/role/i);
   });

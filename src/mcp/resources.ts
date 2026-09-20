@@ -3,6 +3,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { isUserError } from "../core/errors.js";
 import { assertId } from "../core/ids.js";
 import { memoryList } from "../core/memory.js";
+import { resolveInspectSessionId } from "../core/resolve.js";
 import { sessionInfo } from "../core/session.js";
 import type { BusDeps } from "../core/types.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../version.js";
@@ -49,6 +50,19 @@ function throwResourceError(err: unknown, uri: string): never {
 
 function throwResourceNotFound(uri: string): never {
   throw new McpError(ErrorCode.InvalidParams, "Resource not found", { uri });
+}
+
+/**
+ * Same authorization as the read tools: an arbitrary existing session id is
+ * not readable just because it exists — it must be the joined session or
+ * LATTICE_DEFAULT_SESSION_ID.
+ */
+async function authorizeSession(deps: BusDeps, sessionId: string, uri: string): Promise<void> {
+  try {
+    resolveInspectSessionId(deps, sessionId);
+  } catch (err) {
+    throwResourceError(err, uri);
+  }
 }
 
 async function requireExistingSession(deps: BusDeps, sessionId: string, uri: string): Promise<void> {
@@ -159,6 +173,7 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
+        await authorizeSession(deps, sessionId, uri.href);
         await requireExistingSession(deps, sessionId, uri.href);
         return jsonContents(uri.href, await sessionInfo(deps, { session_id: sessionId }));
       } catch (err) {
@@ -184,6 +199,7 @@ export function registerResources(server: McpServer, deps: BusDeps): void {
     async (uri, variables) => {
       const sessionId = parseSessionId(variables.session_id, uri.href);
       try {
+        await authorizeSession(deps, sessionId, uri.href);
         await requireExistingSession(deps, sessionId, uri.href);
         return jsonContents(
           uri.href,

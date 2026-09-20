@@ -1,14 +1,17 @@
 import { UserError } from "./errors.js";
-import { assertMemoryKey } from "./ids.js";
+import { assertBoundedText, assertMemoryKey } from "./ids.js";
 import {
   MEMORY_LIST_DEFAULT_LIMIT,
   MEMORY_LIST_MAX_LIMIT,
   MEMORY_LIST_PREVIEW_CHARS,
   MEMORY_VALUE_MAX_CHARS,
+  NOTE_BODY_MAX_CHARS,
+  NOTES_LIST_DEFAULT_LIMIT,
+  NOTES_LIST_MAX_LIMIT,
 } from "./limits.js";
 import { truncateBody } from "./messages.js";
 import { clampListLimit, pageSortedKeys } from "./page.js";
-import { requireJoinedSession, resolveProvidedOrInspectSessionId } from "./resolve.js";
+import { requireJoinedSession, resolveInspectSessionId } from "./resolve.js";
 import type { BusDeps } from "./types.js";
 
 export async function memorySet(
@@ -33,11 +36,29 @@ export async function memorySet(
 export async function memoryGet(
   deps: BusDeps,
   input: { session_id?: string; key: string },
-): Promise<{ key: string; value: string | null; found: boolean; session_id: string }> {
-  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
+): Promise<{
+  key: string;
+  value: string | null;
+  found: boolean;
+  updated_at?: string;
+  updated_by?: string;
+  session_id: string;
+}> {
+  const sessionId = resolveInspectSessionId(deps, input.session_id);
   const key = assertMemoryKey(input.key);
   const value = await deps.store.memoryGet(sessionId, key);
-  return { key, value, found: value !== null, session_id: sessionId };
+  if (value === null) {
+    return { key, value, found: false, session_id: sessionId };
+  }
+  const meta = await deps.store.memoryGetMeta(sessionId, key);
+  return {
+    key,
+    value,
+    found: true,
+    updated_at: meta.updated_at,
+    updated_by: meta.updated_by,
+    session_id: sessionId,
+  };
 }
 
 export async function memoryList(
@@ -50,7 +71,7 @@ export async function memoryList(
   next_cursor?: string;
   truncated: boolean;
 }> {
-  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
+  const sessionId = resolveInspectSessionId(deps, input.session_id);
   const allKeys = await deps.store.memoryKeys(sessionId);
   const limit = clampListLimit(input.limit, MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT);
   const page = pageSortedKeys(allKeys, input.cursor, limit);
@@ -85,14 +106,50 @@ export async function memoryNote(
   input: { session_id?: string; body: string },
 ): Promise<{ note_id: string; session_id: string }> {
   const { sessionId, agentId } = requireJoinedSession(deps, input.session_id);
-  if (!input.body?.trim()) {
-    throw new UserError("body is required.");
-  }
+  const body = assertBoundedText(input.body, "body", NOTE_BODY_MAX_CHARS);
   const noteId = await deps.store.appendNote(sessionId, {
     from: agentId,
-    body: input.body,
+    body,
     ts: new Date().toISOString(),
     kind: "note",
   });
   return { note_id: noteId, session_id: sessionId };
+}
+
+export interface SessionNote {
+  id: string;
+  from: string;
+  body: string;
+  ts: string;
+}
+
+/** Read notes appended with memory_note, oldest first, cursor = last note id. */
+export async function memoryNotes(
+  deps: BusDeps,
+  input: { session_id?: string; cursor?: string; limit?: number },
+): Promise<{
+  session_id: string;
+  notes: SessionNote[];
+  next_cursor?: string;
+  truncated: boolean;
+}> {
+  const sessionId = resolveInspectSessionId(deps, input.session_id);
+  const limit = clampListLimit(input.limit, NOTES_LIST_DEFAULT_LIMIT, NOTES_LIST_MAX_LIMIT);
+  const afterId = input.cursor?.trim() || "0-0";
+  const entries = await deps.store.readNotes(sessionId, afterId, limit + 1);
+  const truncated = entries.length > limit;
+  const page = truncated ? entries.slice(0, limit) : entries;
+  const notes: SessionNote[] = page.map((entry) => ({
+    id: entry.id,
+    from: entry.fields.from ?? "",
+    body: entry.fields.body ?? "",
+    ts: entry.fields.ts ?? "",
+  }));
+  const last = page[page.length - 1];
+  return {
+    session_id: sessionId,
+    notes,
+    next_cursor: truncated && last ? last.id : undefined,
+    truncated,
+  };
 }

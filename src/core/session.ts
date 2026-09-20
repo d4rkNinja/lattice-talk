@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { safeEqual, sha256Hex } from "./crypto.js";
 import { UserError } from "./errors.js";
-import { optionalId } from "./ids.js";
+import { assertBoundedText, optionalId } from "./ids.js";
 import {
   DEFAULT_ROOM,
+  DISPLAY_NAME_MAX_CHARS,
+  HARNESS_MAX_CHARS,
   PEERS_LIST_DEFAULT_LIMIT,
   PEERS_LIST_MAX_LIMIT,
+  ROLE_MAX_CHARS,
   SESSION_ROOMS_CAP,
 } from "./limits.js";
 import { clampListLimit, pageSortedKeys } from "./page.js";
@@ -13,7 +16,6 @@ import { refreshPresence } from "./presence.js";
 import {
   requireJoinedSession,
   resolveInspectSessionId,
-  resolveProvidedOrInspectSessionId,
   resolveSessionId,
 } from "./resolve.js";
 import { ensureMainRoom } from "./rooms.js";
@@ -23,14 +25,33 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function assertJoinToken(deps: BusDeps, provided?: string): void {
+/**
+ * Session-bound join token. The token itself never crosses the MCP boundary:
+ * it lives in LATTICE_JOIN_TOKEN (env). The first token-authorized contact
+ * with a session persists sha256(token) once; later joins must hash to the
+ * same value, and processes without a token configured cannot join a session
+ * that has one. Sessions created without any token stay open.
+ */
+async function assertJoinToken(deps: BusDeps, sessionId: string): Promise<void> {
   const expected = deps.config.joinToken;
-  if (!expected) return;
-  if (!provided) {
-    throw new UserError("join_token is required for this Lattice server.", "auth");
+  if (expected) {
+    const hash = sha256Hex(expected);
+    await deps.store.initJoinTokenHash(sessionId, hash);
+    const stored = await deps.store.getJoinTokenHash(sessionId);
+    if (!stored || !safeEqual(stored, hash)) {
+      throw new UserError(
+        "LATTICE_JOIN_TOKEN does not match the token protecting this session.",
+        "auth",
+      );
+    }
+    return;
   }
-  if (!safeEqual(provided, expected)) {
-    throw new UserError("join_token is invalid.", "auth");
+  const stored = await deps.store.getJoinTokenHash(sessionId);
+  if (stored) {
+    throw new UserError(
+      "This session is protected by LATTICE_JOIN_TOKEN. Set the matching token in this process's env to join.",
+      "auth",
+    );
   }
 }
 
@@ -42,7 +63,6 @@ export async function joinSession(
     agent_id?: string;
     harness?: string;
     display_name?: string;
-    join_token?: string;
   },
 ): Promise<{
   session_id: string;
@@ -52,19 +72,28 @@ export async function joinSession(
   peers: PeerInfo[];
   created: boolean;
 }> {
-  assertJoinToken(deps, input.join_token);
-
-  const role = input.role?.trim();
-  if (!role) {
-    throw new UserError("role is required.");
-  }
+  const role = assertBoundedText(input.role, "role", ROLE_MAX_CHARS);
 
   const sessionId = resolveSessionId(deps, input.session_id);
+  await assertJoinToken(deps, sessionId);
 
   const agentId =
     optionalId(input.agent_id, "agent_id") ??
     (deps.ctx.sessionId === sessionId ? deps.ctx.agentId : undefined) ??
     randomUUID();
+
+  // An explicit agent_id cannot take over an identity whose presence is still
+  // alive — that would let a second process impersonate an online agent.
+  // Re-joining as this process's own identity stays allowed.
+  if (input.agent_id && deps.ctx.agentId !== agentId) {
+    const online = await deps.store.presenceStatus(sessionId, [agentId]);
+    if (online[agentId]) {
+      throw new UserError(
+        `agent_id ${agentId} is already online in this session. Choose a different agent_id, or wait for its presence TTL (${deps.config.presenceTtlSeconds}s) to lapse.`,
+        "auth",
+      );
+    }
+  }
 
   let created = false;
   const existingMeta = await deps.store.getSessionMeta(sessionId);
@@ -78,17 +107,18 @@ export async function joinSession(
     created = await deps.store.initSessionMeta(sessionId, meta);
   }
 
-  if (deps.config.joinToken) {
-    await deps.store.setJoinTokenHash(sessionId, sha256Hex(deps.config.joinToken));
-  }
-
   const existingAgent = await deps.store.getAgent(sessionId, agentId);
   const agent: AgentRecord = {
     agent_id: agentId,
     role,
-    harness: input.harness?.trim() || existingAgent?.harness || "unknown",
+    harness:
+      (input.harness?.trim() &&
+        assertBoundedText(input.harness, "harness", HARNESS_MAX_CHARS)) ||
+      existingAgent?.harness ||
+      "unknown",
     display_name:
-      input.display_name?.trim() ||
+      (input.display_name?.trim() &&
+        assertBoundedText(input.display_name, "display_name", DISPLAY_NAME_MAX_CHARS)) ||
       existingAgent?.display_name ||
       role ||
       agentId,
@@ -134,7 +164,7 @@ export async function listPeers(
   next_cursor?: string;
   truncated: boolean;
 }> {
-  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
+  const sessionId = resolveInspectSessionId(deps, input.session_id);
   const ids = await deps.store.listAgentIds(sessionId);
   const limit = clampListLimit(input.limit, PEERS_LIST_DEFAULT_LIMIT, PEERS_LIST_MAX_LIMIT);
   const page = pageSortedKeys(ids, input.cursor, limit);
@@ -167,7 +197,7 @@ export async function sessionInfo(
   created_at?: string;
   created_by?: string;
 }> {
-  const sessionId = resolveProvidedOrInspectSessionId(deps, input.session_id);
+  const sessionId = resolveInspectSessionId(deps, input.session_id);
   const meta = await deps.store.getSessionMeta(sessionId);
   const peer_count = await deps.store.countAgents(sessionId);
   const allRooms = await deps.store.listRooms(sessionId);

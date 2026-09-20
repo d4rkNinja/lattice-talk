@@ -1,5 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { memoryGet, memoryList, memoryNote, memorySet } from "../../core/memory.js";
+import {
+  memoryGet,
+  memoryList,
+  memoryNote,
+  memoryNotes,
+  memorySet,
+} from "../../core/memory.js";
 import { resolveInspectSessionId } from "../../core/resolve.js";
 import type { BusDeps } from "../../core/types.js";
 import { readOnly, write } from "../annotations.js";
@@ -12,6 +18,8 @@ import {
   memoryListSchema,
   memoryNoteOutputSchema,
   memoryNoteSchema,
+  memoryNotesOutputSchema,
+  memoryNotesSchema,
   memorySetOutputSchema,
   memorySetSchema,
 } from "../schemas.js";
@@ -69,7 +77,8 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
   server.registerTool(
     "memory_note",
     {
-      description: "Append an immutable note to the session notes stream as this joined process.",
+      description:
+        "Append an immutable note (max 8k chars) to the session notes stream as this joined process. Read notes back with memory_notes.",
       inputSchema: memoryNoteSchema,
       outputSchema: memoryNoteOutputSchema,
       annotations: write("Append memory note"),
@@ -81,5 +90,21 @@ export function registerMemoryTools(server: McpServer, deps: BusDeps): void {
         { sessionId: args.session_id },
         async () => toolOk(await memoryNote(deps, args)),
       ),
+  );
+
+  server.registerTool(
+    "memory_notes",
+    {
+      description:
+        "Read notes appended with memory_note (paginated, oldest first; default 50, max 200). Pass cursor from the previous page to continue.",
+      inputSchema: memoryNotesSchema,
+      outputSchema: memoryNotesOutputSchema,
+      annotations: readOnly("Read memory notes"),
+    },
+    async (args) =>
+      runTool("memory_notes", deps, { sessionId: args.session_id }, async () => {
+        const sessionId = resolveInspectSessionId(deps, args.session_id);
+        return toolOk(await memoryNotes(deps, { ...args, session_id: sessionId }));
+      }),
   );
 }

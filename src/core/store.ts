@@ -18,7 +18,8 @@ export interface Store {
   removeAgent(sessionId: string, agentId: string): Promise<void>;
 
   getJoinTokenHash(sessionId: string): Promise<string | null>;
-  setJoinTokenHash(sessionId: string, hash: string): Promise<void>;
+  /** Set-once (SETNX). Returns false when a hash is already stored. */
+  initJoinTokenHash(sessionId: string, hash: string): Promise<boolean>;
 
   touchPresence(sessionId: string, agentId: string, ttlSeconds: number): Promise<void>;
   clearPresence(sessionId: string, agentId: string): Promise<void>;
@@ -53,13 +54,12 @@ export interface Store {
     meta?: Record<string, string>,
   ): Promise<void>;
   memoryGet(sessionId: string, key: string): Promise<string | null>;
+  memoryGetMeta(sessionId: string, key: string): Promise<Record<string, string>>;
   memoryKeys(sessionId: string): Promise<string[]>;
   memoryGetMany(sessionId: string, fieldKeys: string[]): Promise<Record<string, string>>;
   memoryList(sessionId: string): Promise<Record<string, string>>;
   appendNote(sessionId: string, fields: Record<string, string>): Promise<string>;
   readNotes(sessionId: string, afterId: string, limit: number): Promise<StreamEntry[]>;
-
-  publishWake(sessionId: string, payload: string): Promise<void>;
 
   ping(): Promise<boolean>;
   close(): Promise<void>;
