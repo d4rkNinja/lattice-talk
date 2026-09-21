@@ -34,6 +34,10 @@ rl.on("line", (line) => {
     reply({ protocolVersion: 1, authMethods: [] });
   } else if (method === "session/new") {
     note(`session.new mcpServers=${JSON.stringify(params.mcpServers)} cwd=${params.cwd}`);
+    if (process.env.FAKE_FAIL_SESSION === "1") {
+      fail(-32000, "Session creation failed: not authenticated");
+      return;
+    }
     reply({ sessionId: "sess-1" });
   } else if (method === "session/prompt") {
     const text = params.prompt?.[0]?.text ?? "";

@@ -54,7 +54,10 @@ export class AcpDriver implements HarnessDriver {
       env: opts.env,
       shell: this.shell,
       onStderr: (line) => onEvent(`[${this.id}] ${line}`),
-      onExit: (code) => onEvent(`[${this.id}] exited (code ${code ?? "?"})`),
+      onExit: (code) => {
+        onEvent(`[${this.id}] exited (code ${code ?? "?"})`);
+        opts.onExit?.(code);
+      },
     });
     this.rpc = rpc;
 

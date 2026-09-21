@@ -14,6 +14,8 @@ export interface DriverOpts {
   initialPrompt: string;
   /** Human-readable event stream (stderr, session updates) for the user. */
   onEvent?: (line: string) => void;
+  /** Fires when the agent process exits — the bridge shuts down with it. */
+  onExit?: (code: number | null) => void;
 }
 
 export interface HarnessDriver {

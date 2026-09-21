@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AcpDriver } from "../src/bridge/acp.js";
 import { CodexDriver } from "../src/bridge/codex.js";
+import { NdjsonRpc } from "../src/bridge/ndjson-rpc.js";
 import { createDriver, runBridge } from "../src/bridge/runner.js";
 import { bridgeJoinPrompt } from "../src/bridge/prompt.js";
 import type { DriverOpts, HarnessDriver } from "../src/bridge/driver.js";
@@ -41,6 +42,41 @@ const readLog = (p: string) => {
 
 afterEach(() => {
   while (tmpDirs.length) rmSync(tmpDirs.pop()!, { recursive: true, force: true });
+});
+
+describe("NdjsonRpc transport", () => {
+  const echo = () =>
+    new NdjsonRpc(NODE, [join(FIXTURES, "echo-rpc.mjs")], { shell: false });
+
+  it("resolves requests with their result", async () => {
+    const rpc = echo();
+    const res = await rpc.request<{ hi: string }>("echo", { hi: "there" });
+    expect(res.hi).toBe("there");
+    await rpc.close();
+  });
+
+  it("rejects requests with the JSON-RPC error", async () => {
+    const rpc = echo();
+    await expect(rpc.request("boom")).rejects.toThrow(/kaboom.*123/);
+    await rpc.close();
+  });
+
+  it("dispatches notifications to registered handlers", async () => {
+    const rpc = echo();
+    let n = 0;
+    rpc.onNotification("poked", () => n++);
+    await rpc.request("poke");
+    await waitUntil(() => n === 1);
+    await rpc.close();
+  });
+
+  it("answers server-to-client requests through onRequest", async () => {
+    const rpc = echo();
+    rpc.onRequest("whoareyou", () => ({ name: "the-bridge" }));
+    const res = await rpc.request<{ name: string }>("ask");
+    expect(res.name).toBe("the-bridge");
+    await rpc.close();
+  });
 });
 
 describe("ACP driver (gemini/cursor/claude-adapter protocol)", () => {
@@ -90,6 +126,27 @@ describe("ACP driver (gemini/cursor/claude-adapter protocol)", () => {
     await driver.close();
     expect(readLog(log)).toContain('"optionId":"allow-1"');
   });
+
+  it("fails session setup with a friendly error naming the install hint", async () => {
+    const driver = new AcpDriver(
+      "gemini",
+      {
+        command: NODE,
+        args: [join(FIXTURES, "fake-acp.mjs")],
+        installHint: "requires `gemini` (Gemini CLI) installed and logged in",
+      },
+      false,
+    );
+    await expect(
+      driver.start({
+        cwd: process.cwd(),
+        env: { FAKE_LOG: logPath(), FAKE_FAIL_SESSION: "1" },
+        mcpServers: [],
+        initialPrompt: "init",
+      }),
+    ).rejects.toThrow(/requires `gemini`/);
+    await driver.close();
+  });
 });
 
 describe("Codex app-server driver", () => {
@@ -112,6 +169,23 @@ describe("Codex app-server driver", () => {
     expect(text).toContain("turn=join the bus");
     expect(text).toContain("steer=second message");
   });
+
+  it("falls back to turn/start when steer reports no in-flight turn", async () => {
+    const log = logPath();
+    const driver = new CodexDriver(NODE, [join(FIXTURES, "fake-codex.mjs")], false);
+    await driver.start({
+      cwd: process.cwd(),
+      env: { FAKE_LOG: log, CODEX_HOLD_TURN: "1", CODEX_STEER_FAIL: "1" },
+      mcpServers: [],
+      initialPrompt: "join the bus",
+    });
+    // Turn is held open → send() tries steer first, which fails → turn/start.
+    await driver.send("fallback message");
+    await driver.close();
+    const text = readLog(log);
+    expect(text).toContain("turn=fallback message");
+    expect(text).not.toContain("steer=fallback message");
+  });
 });
 
 class FakeDriver implements HarnessDriver {
@@ -119,12 +193,18 @@ class FakeDriver implements HarnessDriver {
   sent: string[] = [];
   initialPrompt = "";
   closed = false;
+  private onExit?: (code: number | null) => void;
   async start(opts: DriverOpts) {
     this.initialPrompt = opts.initialPrompt;
+    this.onExit = opts.onExit;
     this.sent.push(opts.initialPrompt);
   }
   async send(text: string) {
     this.sent.push(text);
+  }
+  /** Simulate the agent process dying. */
+  exit(code = 0) {
+    this.onExit?.(code);
   }
   async close() {
     this.closed = true;
@@ -180,6 +260,79 @@ describe("runBridge pump", () => {
     ac.abort();
     await bridge;
     expect(driver.closed).toBe(true);
+  });
+
+  it("does not inject room history written before the bridge started", async () => {
+    const store = new MemoryStore("test");
+    const fe = makeDeps(store, testConfig());
+    await joinSession(fe, { session_id: "w1", role: "fe", agent_id: "fe" });
+    await tellRoom(fe, { room_id: "main", body: "ancient history" });
+
+    const driver = new FakeDriver();
+    const ac = new AbortController();
+    const bridge = runBridge({
+      harness: "gemini",
+      conn: { namespace: "test", workspace: "w1" },
+      roomId: "main",
+      cwd: process.cwd(),
+      driver,
+      signal: ac.signal,
+      store,
+    });
+    await waitUntil(() => driver.sent.length > 0);
+    await sleep(60); // let the post-subscribe sweep run
+    expect(driver.sent.every((s) => !s.includes("ancient history"))).toBe(true);
+
+    // New traffic still flows.
+    await tellRoom(fe, { room_id: "main", body: "fresh message" });
+    await waitUntil(() => driver.sent.some((s) => s.includes("fresh message")));
+    ac.abort();
+    await bridge;
+  });
+
+  it("shuts the bridge down when the agent process exits", async () => {
+    const store = new MemoryStore("test");
+    const driver = new FakeDriver();
+    const logs: string[] = [];
+    const bridge = runBridge({
+      harness: "codex",
+      conn: { namespace: "test", workspace: "w1" },
+      roomId: "main",
+      cwd: process.cwd(),
+      driver,
+      store,
+      log: (l) => logs.push(l),
+    });
+    await waitUntil(() => driver.sent.length > 0);
+    driver.exit(0);
+    await bridge; // resolves on its own — no abort needed
+    expect(driver.closed).toBe(true);
+    expect(logs.some((l) => l.includes("agent process exited"))).toBe(true);
+  });
+
+  it("delivers DMs immediately for a pinned --agent-id (no discovery wait)", async () => {
+    const store = new MemoryStore("test");
+    const fe = makeDeps(store, testConfig());
+    const g = makeDeps(store, testConfig());
+    const driver = new FakeDriver();
+    const ac = new AbortController();
+    const bridge = runBridge({
+      harness: "claude",
+      conn: { namespace: "test", workspace: "w1" },
+      roomId: "main",
+      agentId: "g1",
+      cwd: process.cwd(),
+      driver,
+      signal: ac.signal,
+      store,
+    });
+    await waitUntil(() => driver.sent.length > 0);
+    await joinSession(g, { session_id: "w1", role: "g", agent_id: "g1", harness: "claude" });
+    await joinSession(fe, { session_id: "w1", role: "f", agent_id: "fe" });
+    await tellAgent(fe, { to_agent_id: "g1", body: "direct ping" });
+    await waitUntil(() => driver.sent.some((s) => s.includes("[lattice · dm · fe] direct ping")));
+    ac.abort();
+    await bridge;
   });
 
   it("rejects windsurf with the honest fallback message", async () => {

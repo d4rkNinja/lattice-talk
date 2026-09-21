@@ -199,6 +199,10 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
       tokenProtected: Boolean(opts.conn.joinToken),
     }),
     onEvent: log,
+    onExit: (code) => {
+      log(`[bridge] agent process exited (code ${code ?? "?"}) — shutting down.`);
+      stop.abort();
+    },
   });
   log(`[bridge] ${opts.harness} session up — injecting room "${roomId}" traffic into it.`);
 
@@ -220,15 +224,18 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
       }
     },
   );
+  // Close the seed→subscribe gap: anything written between the tail-seed and
+  // the subscription going live would otherwise wait for the next sweep.
+  await sweep();
 
   const sweepTimer = setInterval(() => void sweep(), SWEEP_MS);
-  const discoveryTimer = setTimeout(
-    () =>
+  const discoveryTimer = setTimeout(() => {
+    if (!bridgedAgentId) {
       log(
         "[bridge] still waiting for the agent to join the workspace — check that it ran join_session.",
-      ),
-    DISCOVERY_TIMEOUT_MS,
-  );
+      );
+    }
+  }, DISCOVERY_TIMEOUT_MS);
 
   const onSignal = () => stop.abort();
   process.on("SIGINT", onSignal);

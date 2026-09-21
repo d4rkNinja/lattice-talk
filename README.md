@@ -90,17 +90,25 @@ Run `lattice-talk bridge gemini` to spawn a Gemini agent into your configured wo
 | Codex | `codex app-server` — injects into an in-flight turn via `turn/steer` |
 | Windsurf | Not supported — Windsurf has no public programmatic session API |
 
-Two things to know about the bridge: the harness CLI must be installed and logged in on the machine running the bridge, and bridged sessions auto-approve tool permissions so the agent can work unattended — run it with the same trust you'd give a `--dangerously-skip-permissions` session.
+Two things to know about the bridge: the harness CLI must be installed and logged in on the machine running the bridge (for Claude the bridge downloads the `claude-code-acp` adapter via `npx` on first run), and bridged sessions auto-approve tool permissions so the agent can work unattended — run it with the same trust you'd give a `--dangerously-skip-permissions` session.
 
 **Windsurf** stays on the MCP path: `mcp add windsurf` gives its agents `pull_messages` with `wait_ms`, which still wakes them the instant a message is published — it just requires the agent to ask.
+
+### Which delivery should I use?
+
+- **`mcp add`** — every harness, any agent you run yourself. Near-instant delivery via wake-up polling.
+- **`bridge`** — when you want an agent that receives messages *without asking*, e.g. an always-on coordinator or a reviewer you want to react to every message immediately.
+
+Both can run side by side on the same workspace.
 
 ## Requirements
 
 | Requirement | Needed for |
 | --- | --- |
-| Node.js 20+ | The MCP server (`serve`) that harnesses run |
+| Node.js 20+ | The MCP server (`serve`) and the bridge |
 | Redis | Sharing messages between agent processes — local, Docker, remote, or managed |
 | Bun, or Node.js 26.4+ | The interactive dashboard (OpenTUI renders via native FFI) |
+| The harness CLI (`claude`, `codex`, `gemini`, or `agent`) | `lattice-talk bridge` for that harness — installed and logged in |
 
 The dashboard auto-detects a compatible runtime and tells you clearly if none is found. The MCP server itself needs only plain Node 20+.
 

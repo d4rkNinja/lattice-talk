@@ -30,7 +30,10 @@ export class CodexDriver implements HarnessDriver {
       env: opts.env,
       shell: this.shell,
       onStderr: (line) => onEvent(`[codex] ${line}`),
-      onExit: (code) => onEvent(`[codex] exited (code ${code ?? "?"})`),
+      onExit: (code) => {
+        onEvent(`[codex] exited (code ${code ?? "?"})`);
+        opts.onExit?.(code);
+      },
     });
     this.rpc = rpc;
 

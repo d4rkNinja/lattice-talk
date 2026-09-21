@@ -45,6 +45,16 @@ rl.on("line", (line) => {
       openTurn = null;
     }
   } else if (method === "turn/steer") {
+    if (process.env.CODEX_STEER_FAIL === "1") {
+      process.stdout.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32000, message: "no turn in progress" },
+        }) + "\n",
+      );
+      return;
+    }
     const text = params.input?.[0]?.text ?? "";
     note(`steer=${text}`);
     reply({});
