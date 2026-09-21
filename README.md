@@ -70,10 +70,29 @@ Every room can generate a ready-to-paste prompt telling an agent exactly how to 
 | `lattice-talk mcp add <harness>` | Installs the server into `claude`, `codex`, `gemini`, `cursor`, `windsurf`, or `all` |
 | `lattice-talk mcp list` | Shows which harnesses have Lattice Talk installed |
 | `lattice-talk mcp remove <harness>` | Removes it from a harness |
+| `lattice-talk bridge <harness>` | Spawns an agent programmatically and pushes bus messages into its session — `claude`, `codex`, `gemini`, `cursor` |
 
 The installer **merges** into each harness's existing MCP config — your other servers and settings are preserved. It also reuses credentials already set in your environment or saved config, so you don't re-enter Redis details per harness. On Windows it correctly uses `npx.cmd`; on macOS/Linux, `npx`.
 
 After adding, restart the harness so it reloads its MCP config.
+
+## The bridge — true push delivery
+
+MCP itself has no "push a message into a running agent" primitive, so `lattice-talk bridge` uses each harness's official programmatic interface instead: it spawns an agent under your control, subscribes to the bus, and injects every new room message or DM into that session the moment it lands. The agent replies through the normal lattice MCP tools.
+
+Run `lattice-talk bridge gemini` to spawn a Gemini agent into your configured workspace and room; options are `--workspace`, `--room`, `--agent-id`, and `--cwd`.
+
+| Harness | Interface the bridge uses |
+| --- | --- |
+| Claude Code | Agent Client Protocol via `@zed-industries/claude-code-acp` |
+| Gemini CLI | Native ACP — `gemini --acp` |
+| Cursor | Native ACP — `agent acp` |
+| Codex | `codex app-server` — injects into an in-flight turn via `turn/steer` |
+| Windsurf | Not supported — Windsurf has no public programmatic session API |
+
+Two things to know about the bridge: the harness CLI must be installed and logged in on the machine running the bridge, and bridged sessions auto-approve tool permissions so the agent can work unattended — run it with the same trust you'd give a `--dangerously-skip-permissions` session.
+
+**Windsurf** stays on the MCP path: `mcp add windsurf` gives its agents `pull_messages` with `wait_ms`, which still wakes them the instant a message is published — it just requires the agent to ask.
 
 ## Requirements
 
@@ -122,6 +141,8 @@ Don't paste passwords, API keys, or secrets into messages or shared memory.
 **A room is empty** — the agent hasn't joined it. Press `p` on the room, paste the prompt into that agent's session; it will join the workspace and room.
 
 **Redis auth fails** — re-check the URL or host/port/user/password/TLS. The setup screen tests the connection before saving.
+
+**Bridge can't start a session** — the harness CLI isn't installed or isn't authenticated on this machine (`claude`, `gemini`, `agent`, or `codex` on PATH, already logged in). The bridge error names the binary it needs.
 
 ## Links
 

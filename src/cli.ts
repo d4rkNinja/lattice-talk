@@ -16,6 +16,8 @@ import {
   removeHarness,
   resolveHarnesses,
 } from "./cli/harnesses.js";
+import { runBridge } from "./bridge/runner.js";
+import { BRIDGE_HARNESSES } from "./bridge/driver.js";
 import { startServer } from "./mcp/server.js";
 import { PACKAGE_VERSION } from "./version.js";
 
@@ -33,6 +35,9 @@ Usage:
   lattice-talk mcp list        Show harness install status
   lattice-talk mcp add <h>...  Install into harnesses (claude codex gemini cursor windsurf | all)
   lattice-talk mcp remove <h>… Remove from harnesses
+  lattice-talk bridge <h>      Spawn an agent programmatically and push bus
+                              messages into it (claude | codex | gemini | cursor)
+                              Options: --workspace --room --agent-id --cwd
   lattice-talk --version       Print version
   lattice-talk --help          This help
 
@@ -182,6 +187,52 @@ async function mcpCommand(rest: string[]): Promise<number> {
   return 0;
 }
 
+/** Parse `--flag value` pairs from a bridge command tail. */
+function parseFlags(rest: string[]): { harness?: string; flags: Map<string, string> } {
+  let harness: string | undefined;
+  const flags = new Map<string, string>();
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i]!;
+    if (arg.startsWith("--")) {
+      const value = rest[i + 1];
+      if (value === undefined || value.startsWith("--")) {
+        flags.set(arg.slice(2), "");
+      } else {
+        flags.set(arg.slice(2), value);
+        i += 1;
+      }
+    } else if (!harness) {
+      harness = arg;
+    }
+  }
+  return { harness, flags };
+}
+
+async function bridgeCommand(rest: string[]): Promise<number> {
+  const { harness, flags } = parseFlags(rest);
+  if (!harness) {
+    err(`Usage: lattice-talk bridge <${BRIDGE_HARNESSES.join(" | ")}> [--workspace w] [--room r] [--agent-id id] [--cwd dir]`);
+    return 1;
+  }
+  const { config } = loadFileConfig();
+  const conn = resolveConnection(config);
+  if (flags.has("workspace")) conn.workspace = flags.get("workspace") || undefined;
+  try {
+    await runBridge({
+      harness,
+      conn,
+      roomId: flags.get("room") || "main",
+      agentId: flags.get("agent-id") || undefined,
+      cwd: flags.get("cwd") || process.cwd(),
+      log: (line) => out(line),
+    });
+    return 0;
+  } catch (e) {
+    err(e instanceof Error ? e.message : String(e));
+    return 1;
+  }
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   switch (cmd) {
@@ -208,6 +259,8 @@ export async function main(argv: string[]): Promise<number> {
       return runTui(["--setup"]);
     case "mcp":
       return mcpCommand(rest);
+    case "bridge":
+      return bridgeCommand(rest);
     case "help":
     case "--help":
     case "-h":
