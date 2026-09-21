@@ -46,11 +46,20 @@ export class NdjsonRpc {
       const errRl = createInterface({ input: this.proc.stderr });
       errRl.on("line", (line) => opts.onStderr!(line));
     }
-    this.proc.on("exit", (code) => {
+    const failAll = (err: Error) => {
       this.closed = true;
-      const err = new Error(`process exited with code ${code}`);
       for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
+    };
+    // Missing binary (ENOENT) emits 'error', not 'exit' — without this an
+    // unhandled 'error' event crashes the process instead of surfacing as
+    // a failed handshake.
+    this.proc.on("error", (e) => {
+      failAll(e);
+      opts.onExit?.(null);
+    });
+    this.proc.on("exit", (code) => {
+      failAll(new Error(`process exited with code ${code}`));
       opts.onExit?.(code);
     });
   }

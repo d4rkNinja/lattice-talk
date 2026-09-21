@@ -94,16 +94,16 @@ export class AcpDriver implements HarnessDriver {
       }
     });
 
-    const init = (await rpc.request("initialize", {
-      protocolVersion: ACP_PROTOCOL_VERSION,
-      clientCapabilities: {
-        fs: { readTextFile: false, writeTextFile: false },
-        terminal: false,
-      },
-      clientInfo: { name: "lattice-talk-bridge", version: "0" },
-    })) as { authMethods?: { id: string }[] };
-
+    let init: { authMethods?: { id: string }[] } | undefined;
     try {
+      init = (await rpc.request("initialize", {
+        protocolVersion: ACP_PROTOCOL_VERSION,
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          terminal: false,
+        },
+        clientInfo: { name: "lattice-talk-bridge", version: "0" },
+      })) as { authMethods?: { id: string }[] };
       const res = (await rpc.request("session/new", {
         cwd: opts.cwd,
         mcpServers: opts.mcpServers.map(serializeMcpServer),

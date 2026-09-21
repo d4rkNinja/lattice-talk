@@ -50,3 +50,19 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm pack --dry-run
+
+  macos:
+    # Same memory-store + spawn coverage on macOS — the bridge drivers and
+    # fixtures spawn real child processes, so all three OSes run the suite.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: npm pack --dry-run

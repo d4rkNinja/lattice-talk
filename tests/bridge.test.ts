@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { AcpDriver } from "../src/bridge/acp.js";
 import { CodexDriver } from "../src/bridge/codex.js";
@@ -14,7 +15,7 @@ import { joinSession } from "../src/core/session.js";
 import { makeDeps, testConfig } from "./helpers.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const FIXTURES = join(import.meta.dirname, "fixtures");
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const NODE = process.execPath;
 
 async function waitUntil(pred: () => boolean, ms = 3000): Promise<void> {
