@@ -79,11 +79,16 @@ const mono = {
 
 export type Palette = Record<keyof typeof rich, ColorInput>;
 
-export const colors: Palette = process.env.NO_COLOR
-  ? { ...mono }
+export type ColorTier = "rich" | "ansi16" | "mono";
+
+export const colorTier: ColorTier = process.env.NO_COLOR
+  ? "mono"
   : supportsTruecolor()
-    ? { ...rich }
-    : { ...ansi16 };
+    ? "rich"
+    : "ansi16";
+
+export const colors: Palette =
+  colorTier === "mono" ? { ...mono } : colorTier === "rich" ? { ...rich } : { ...ansi16 };
 
 /**
  * Glyph set. Legacy Windows conhost (cmd/PowerShell without Windows
@@ -98,7 +103,9 @@ function legacyConsole(env: NodeJS.ProcessEnv = process.env): boolean {
   return !env.WT_SESSION && !env.TERM_PROGRAM && !env.TERM;
 }
 
-export const glyphs = legacyConsole()
+export const asciiGlyphs = legacyConsole();
+
+export const glyphs = asciiGlyphs
   ? {
       spinner: ["|", "/", "-", "\\"],
       pointer: ">",
@@ -131,6 +138,15 @@ export const glyphs = legacyConsole()
       ok: "✓",
       bad: "✗",
     };
+
+/**
+ * Animations off when asked (LATTICE_NO_ANIM) or on legacy consoles: if the
+ * renderer's frame engine can't tick reliably there, opacity-animated
+ * elements would be stuck near-invisible — a ghost-dark UI.
+ */
+export const noAnim =
+  ["1", "true", "yes", "on"].includes((process.env.LATTICE_NO_ANIM ?? "").toLowerCase()) ||
+  asciiGlyphs;
 
 export const kindColor: Record<string, ColorInput> = {
   chat: colors.fg,

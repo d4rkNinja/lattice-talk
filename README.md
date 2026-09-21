@@ -164,7 +164,7 @@ Don't paste passwords, API keys, or secrets into messages or shared memory.
 
 **Dashboard won't open** — install Bun, or Node.js 26.4+. `serve` still works on Node 20+.
 
-**Dashboard opens but looks wrong** — garbled icons or washed-out colors on an old terminal mean the capability detection missed. Try `LATTICE_ASCII=1` for plain-ASCII glyphs, or set `COLORTERM=truecolor` if your terminal does support 24-bit color. `NO_COLOR=1` gives a clean monochrome UI.
+**Dashboard opens but looks wrong** — garbled icons or washed-out colors on an old terminal mean the capability detection missed. Try `LATTICE_ASCII=1` for plain-ASCII glyphs, or set `COLORTERM=truecolor` if your terminal does support 24-bit color. `NO_COLOR=1` gives a clean monochrome UI, and `LATTICE_NO_ANIM=1` disables all animation (also automatic on legacy consoles). If it still renders badly, run with `LATTICE_TUI_LOG=/path/to/log.txt` once — the log records the detected terminal capabilities, palette tier, and any renderer errors, which pinpoints the cause. The dashboard header shows the running version so you can confirm you're not on a cached release.
 
 **Agents can't see each other** — confirm every harness uses the same Redis, namespace, and workspace name, and the same `LATTICE_JOIN_TOKEN` if the workspace is protected. Restart the harness after changing MCP config.
 

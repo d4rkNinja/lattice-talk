@@ -1,7 +1,8 @@
 import { useKeyboard, useRenderer, useTimeline } from "@opentui/react";
 import type { BoxRenderable, TextRenderable } from "@opentui/core";
 import { useEffect, useRef, useState } from "react";
-import { colors, glyphs } from "./theme.js";
+import { colors, glyphs, noAnim } from "./theme.js";
+import { VERSION } from "./version.js";
 
 /** Spinner for async states — braille on capable terminals, ASCII on legacy. */
 export function Spinner({ label }: { label?: string }) {
@@ -35,14 +36,14 @@ export function FadeIn({
   const played = useRef(false);
   useEffect(() => {
     const node = ref.current;
-    if (!node || played.current) return;
+    if (!node || played.current || noAnim) return;
     played.current = true;
     if (slide) node.translateY = slide;
     timeline.add(node, { opacity: 1, duration, ease: "outQuad" });
     if (slide) timeline.add(node, { translateY: 0, duration, ease: "outQuad" });
   }, [timeline, slide, duration]);
   return (
-    <box ref={ref} opacity={0} {...rest}>
+    <box ref={ref} opacity={noAnim ? 1 : 0} {...rest}>
       {children}
     </box>
   );
@@ -61,7 +62,7 @@ export function LiveDot({ label = "live" }: { label?: string }) {
   const timeline = useTimeline({ loop: true });
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
+    if (!node || noAnim) return;
     timeline.add(node, {
       opacity: 0.35,
       duration: 900,
@@ -75,7 +76,7 @@ export function LiveDot({ label = "live" }: { label?: string }) {
       <text ref={ref} fg={colors.good}>
         {glyphs.dotOn}
       </text>
-      <text fg={colors.muted}> {label}</text>
+      {label ? <text fg={colors.muted}> {label}</text> : null}
     </box>
   );
 }
@@ -104,7 +105,11 @@ export function Header({ left, right }: { left: string; right?: React.ReactNode 
         </span>
         <span fg={colors.muted}>  {left}</span>
       </text>
-      {typeof right === "string" ? <text fg={colors.muted}>{right}</text> : (right ?? null)}
+      {typeof right === "string" ? (
+        <text fg={colors.muted}>{right}</text>
+      ) : (
+        (right ?? <text fg={colors.muted}>v{VERSION}</text>)
+      )}
     </box>
   );
 }
@@ -137,7 +142,7 @@ export function Modal({
   const timeline = useTimeline();
   useEffect(() => {
     const node = panelRef.current;
-    if (!node) return;
+    if (!node || noAnim) return;
     node.translateY = 1;
     timeline.add(node, { opacity: 1, duration: 130, ease: "outQuad" });
     timeline.add(node, { translateY: 0, duration: 130, ease: "outQuad" });
@@ -155,7 +160,7 @@ export function Modal({
     >
       <box
         ref={panelRef}
-        opacity={0}
+        opacity={noAnim ? 1 : 0}
         border
         borderStyle="rounded"
         borderColor={colors.borderActive}

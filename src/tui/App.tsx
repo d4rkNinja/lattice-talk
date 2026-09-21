@@ -12,6 +12,7 @@ import { RoomsScreen } from "./screens/RoomsScreen.js";
 import { RoomScreen } from "./screens/RoomScreen.js";
 import { SetupScreen } from "./screens/SetupScreen.js";
 import { FadeIn, Logo, Spinner } from "./components.js";
+import { VERSION } from "./version.js";
 
 type View =
   | { type: "rooms" }
@@ -87,6 +88,7 @@ export function App({ forceSetup = false }: { forceSetup?: boolean }) {
         <FadeIn duration={350}>
           <Logo />
         </FadeIn>
+        <text fg={colors.dim}>v{VERSION}</text>
         <Spinner label="connecting to your bus" />
       </box>
     );

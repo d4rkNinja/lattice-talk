@@ -94,7 +94,7 @@ export function SetupScreen({
 
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={colors.bg}>
-      <Header left="guided setup" right="lattice-talk" />
+      <Header left="guided setup" />
       <box flexGrow={1} justifyContent="center" alignItems="center" flexDirection="column">
         <FadeIn duration={280} marginBottom={1}>
           <Logo />
