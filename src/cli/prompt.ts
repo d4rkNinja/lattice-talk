@@ -21,9 +21,15 @@ export function agentJoinPrompt(opts: {
     lines.push(
       `3. pull_messages — room_id: "${roomId}" to read new messages; tell_room to post. Use inbox=true for direct messages.`,
     );
+    lines.push(
+      "   To wait for replies, call pull_messages with wait_ms (e.g. 30000) — it returns the moment a message is published instead of polling in a loop.",
+    );
   } else {
     lines.push(
       "2. pull_messages — reads room \"main\" by default; tell_room to post. Use inbox=true for direct messages.",
+    );
+    lines.push(
+      "   To wait for replies, call pull_messages with wait_ms (e.g. 30000) — it returns the moment a message is published instead of polling in a loop.",
     );
   }
   if (tokenProtected) {

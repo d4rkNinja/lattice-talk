@@ -111,6 +111,37 @@ describe("pull_messages wait_ms wake-ups", () => {
     const res = await pullMessages(be, { room_id: "main", wait_ms: 0 });
     expect(res.messages).toHaveLength(0);
   });
+
+  it("a cancelled request resolves the wait early", async () => {
+    const store = new MemoryStore("test");
+    const be = makeDeps(store, testConfig());
+    await joinSession(be, { session_id: "s1", role: "be", agent_id: "be" });
+
+    const controller = new AbortController();
+    const waiting = pullMessages(
+      be,
+      { inbox: true, wait_ms: 5000 },
+      { signal: controller.signal },
+    );
+    await sleep(20);
+    controller.abort();
+    const res = await waiting;
+    expect(res.messages).toHaveLength(0);
+  });
+
+  it("onWaitStart fires only when the pull actually waits", async () => {
+    const store = new MemoryStore("test");
+    const be = makeDeps(store, testConfig());
+    await joinSession(be, { session_id: "s1", role: "be", agent_id: "be" });
+
+    let waited = 0;
+    const onWaitStart = () => waited++;
+    await pullMessages(be, { inbox: true, wait_ms: 50 }, { onWaitStart });
+    expect(waited).toBe(1);
+    // No wait_ms → no wait → callback never fires.
+    await pullMessages(be, { inbox: true }, { onWaitStart });
+    expect(waited).toBe(1);
+  });
 });
 
 describe("meta notifications", () => {

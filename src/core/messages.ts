@@ -213,6 +213,13 @@ async function pullOneStream(
   return { messages, next_cursor: cursor === "0-0" ? undefined : cursor, truncated };
 }
 
+export interface PullOptions {
+  /** Aborted when the client cancels the in-flight request. */
+  signal?: AbortSignal;
+  /** Called once when the pull starts waiting — e.g. to emit a progress notification. */
+  onWaitStart?: () => void;
+}
+
 export async function pullMessages(
   deps: BusDeps,
   input: {
@@ -223,6 +230,7 @@ export async function pullMessages(
     limit?: number;
     wait_ms?: number;
   },
+  opts?: PullOptions,
 ): Promise<PullResult> {
   const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
 
@@ -235,30 +243,33 @@ export async function pullMessages(
     const channels = [keys.notifyDm(deps.config.namespace, sessionId, agentId)];
     return pullWithWait(deps, waitMs, channels, () =>
       pullInbox(deps, sessionId, agentId, input.other_agent_id, limit),
-    );
+    opts);
   }
 
   const roomId = assertId(input.room_id?.trim() || DEFAULT_ROOM, "room_id");
   const channels = [keys.notifyRoom(deps.config.namespace, sessionId, roomId)];
   return pullWithWait(deps, waitMs, channels, () =>
     pullRoomStream(deps, sessionId, agentId, roomId, limit),
-  );
+  opts);
 }
 
 /**
  * Pull, and when nothing is new optionally block until a pub/sub wake-up
- * fires (a sender just wrote) or waitMs lapses. The post-subscribe recheck
- * inside waitForNotify closes the subscribe window so no message is missed.
+ * fires (a sender just wrote), waitMs lapses, or the request is cancelled.
+ * The post-subscribe recheck inside waitForNotify closes the subscribe
+ * window so no message is missed.
  */
 async function pullWithWait(
   deps: BusDeps,
   waitMs: number,
   channels: string[],
   pullNow: () => Promise<PullResult>,
+  opts?: PullOptions,
 ): Promise<PullResult> {
   const first = await pullNow();
-  if (waitMs <= 0 || first.messages.length > 0) return first;
+  if (waitMs <= 0 || first.messages.length > 0 || opts?.signal?.aborted) return first;
 
+  opts?.onWaitStart?.();
   let buffered: PullResult | undefined;
   const notified = await waitForNotify(deps.store, channels, waitMs, async () => {
     const recheck = await pullNow();
@@ -267,7 +278,7 @@ async function pullWithWait(
       return true;
     }
     return false;
-  });
+  }, opts?.signal);
   if (buffered) return buffered;
   if (!notified) return first;
   return pullNow();

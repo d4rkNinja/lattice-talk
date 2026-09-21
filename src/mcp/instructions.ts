@@ -9,6 +9,7 @@ export const SERVER_INSTRUCTIONS = [
   "Search these tools when multiple agents must share one session_id: join the session, DM or room-chat, pull new messages, and store short shared facts.",
   "Always join_session first (same session_id + Redis URL + namespace = the same bus across machines). After join, this process is the sender/reader — later tools ignore any other agent_id. Tools take no secrets: Redis credentials and LATTICE_JOIN_TOKEN live in the MCP process env only.",
   "pull_messages, memory_list, memory_notes, and list_peers paginate (defaults 50/50/50/100, max 200) and pull_messages truncates bodies over ~2k characters so results stay under Claude Code’s MCP output limits (warn at 10k tokens, default cap 25k).",
+  "When waiting on peers or expecting a reply, call pull_messages with wait_ms (max 30000): it blocks until a message is published — push wake-up, not polling — so loop it rather than sleeping.",
   "Read lattice://about or lattice://session/{session_id} for compact session/memory context. User prompts: join-session, two-agent-handoff, pull-and-reply.",
   "LATTICE_STORE=memory is single-process only. Cross-harness and cross-machine require Redis.",
   MCP_ALIGNMENT.charAt(0).toUpperCase() + MCP_ALIGNMENT.slice(1) + ".",

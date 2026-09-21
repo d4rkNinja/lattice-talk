@@ -68,12 +68,31 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
       outputSchema: pullMessagesOutputSchema,
       annotations: write("Pull messages"),
     },
-    async (args) =>
+    async (args, ctx) =>
       runTool(
         "pull_messages",
         deps,
         { sessionId: args.session_id, roomId: args.room_id },
-        async () => toolOk(await pullMessages(deps, args)),
+        async () =>
+          toolOk(
+            await pullMessages(deps, args, {
+              signal: ctx.mcpReq.signal,
+              onWaitStart: () => {
+                const progressToken = ctx.mcpReq._meta?.progressToken;
+                if (progressToken === undefined) return;
+                void ctx.mcpReq
+                  .notify({
+                    method: "notifications/progress",
+                    params: {
+                      progressToken,
+                      progress: 0,
+                      message: "waiting for new messages",
+                    },
+                  })
+                  .catch(() => {});
+              },
+            }),
+          ),
       ),
   );
 

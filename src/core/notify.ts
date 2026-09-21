@@ -31,8 +31,10 @@ export async function waitForNotify(
   channels: string[],
   timeoutMs: number,
   recheck?: () => Promise<boolean>,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (channels.length === 0 || timeoutMs <= 0) return false;
+  if (signal?.aborted) return false;
   let wake!: () => void;
   const woke = new Promise<void>((resolve) => {
     wake = resolve;
@@ -43,12 +45,20 @@ export async function waitForNotify(
   } catch {
     return false;
   }
+  let resolveAbort!: () => void;
+  const onAbort = () => resolveAbort?.();
   try {
     if (recheck && (await recheck())) return true;
     const timer = new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs));
-    const hit = await Promise.race([woke.then(() => true as const), timer]);
+    // An aborted request resolves like a timeout — the waiter just drains and returns.
+    const aborted = new Promise<false>((resolve) => {
+      resolveAbort = () => resolve(false);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    const hit = await Promise.race([woke.then(() => true as const), timer, aborted]);
     return hit;
   } finally {
+    signal?.removeEventListener("abort", onAbort);
     await unsub();
   }
 }
