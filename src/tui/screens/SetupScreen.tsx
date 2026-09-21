@@ -3,7 +3,7 @@ import { useState } from "react";
 import { saveFileConfig, type ResolvedConnection } from "../../cli/config-file.js";
 import { pingBus } from "../bus.js";
 import { FadeIn, Footer, Header, Key, Logo, Spinner } from "../components.js";
-import { colors } from "../theme.js";
+import { colors, glyphs } from "../theme.js";
 
 interface Field {
   key: keyof ResolvedConnection;
@@ -17,7 +17,7 @@ const FIELDS: Field[] = [
     key: "redisUrl",
     label: "Redis URL",
     placeholder: "redis://127.0.0.1:6379/0",
-    hint: "redis:// or rediss:// (TLS) — every agent harness uses this bus",
+    hint: `redis:// or rediss:// (TLS) ${glyphs.dash} every agent harness uses this bus`,
   },
   {
     key: "namespace",
@@ -115,7 +115,7 @@ export function SetupScreen({
           {notice ? <text fg={colors.warn}>{notice}</text> : null}
           <text fg={colors.muted}>
             Agents reach each other through Redis. These details are stored in
-            ~/.lattice/config.json — never sent anywhere else.
+            ~/.lattice/config.json {glyphs.dash} never sent anywhere else.
           </text>
           {FIELDS.map((f, i) => (
             <box key={f.key} flexDirection="column">
@@ -156,16 +156,16 @@ export function SetupScreen({
             {busy ? (
               <Spinner label="testing" />
             ) : (
-              <text fg={focus === BUTTON_INDEX ? colors.accent : colors.fg}>→ test & save</text>
+              <text fg={focus === BUTTON_INDEX ? colors.accent : colors.fg}>{glyphs.arrow} test & save</text>
             )}
           </box>
-          {error ? <text fg={colors.bad}>✗ {error}</text> : null}
+          {error ? <text fg={colors.bad}>{glyphs.bad} {error}</text> : null}
         </box>
         </FadeIn>
       </box>
       <Footer>
-        <Key k="tab/↑↓" label="move" />
-        <Key k="⏎" label="next / save" />
+        <Key k={`tab/${glyphs.updown}`} label="move" />
+        <Key k={glyphs.enter} label="next / save" />
       </Footer>
     </box>
   );

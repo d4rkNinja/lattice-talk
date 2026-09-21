@@ -21,7 +21,7 @@ import {
   PromptModal,
   WorkspaceModal,
 } from "../components.js";
-import { colors } from "../theme.js";
+import { colors, glyphs } from "../theme.js";
 
 type ModalState =
   | { type: "create" }
@@ -183,7 +183,7 @@ export function RoomsScreen({
             <box flexDirection="column" gap={1} padding={1}>
               <text fg={colors.muted}>No rooms yet in workspace "{workspace}".</text>
               <text fg={colors.muted}>
-                Press <span fg={colors.accent}>n</span> to create one — agents can
+                Press <span fg={colors.accent}>n</span> to create one {glyphs.dash} agents can
                 then join it.
               </text>
             </box>
@@ -193,13 +193,13 @@ export function RoomsScreen({
                 key={r.id}
                 flexDirection="row"
                 paddingX={1}
-                backgroundColor={i === clamped ? colors.panelAlt : undefined}
+                backgroundColor={i === clamped ? colors.select : undefined}
               >
                 <text>
                   <span fg={i === clamped ? colors.accent : colors.dim}>
-                    {i === clamped ? "▸ " : "  "}
+                    {i === clamped ? `${glyphs.pointer} ` : "  "}
                   </span>
-                  <span fg={i === clamped ? colors.fg : colors.muted}>#{r.id}</span>
+                  <span fg={i === clamped ? colors.accent : colors.muted}>#{r.id}</span>
                   <span fg={colors.dim}>
                     {"  "}
                     {r.members} member{r.members === 1 ? "" : "s"}
@@ -234,7 +234,7 @@ export function RoomsScreen({
           {sessions.slice(0, 8).map((s) => (
             <text key={s} fg={s === workspace ? colors.accent : colors.muted}>
               {"  "}
-              {s === workspace ? "▸ " : "· "}
+              {s === workspace ? `${glyphs.pointer} ` : `${glyphs.bullet} `}
               {s}
             </text>
           ))}
@@ -246,8 +246,8 @@ export function RoomsScreen({
         </box>
       </FadeIn>
       <Footer>
-        <Key k="↑↓/jk" label="move" />
-        <Key k="⏎" label="open" />
+        <Key k={`${glyphs.updown}/jk`} label="move" />
+        <Key k={glyphs.enter} label="open" />
         <Key k="n" label="new room" />
         <Key k="d" label="delete" />
         <Key k="p" label="prompt" />

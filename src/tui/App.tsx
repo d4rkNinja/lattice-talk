@@ -7,7 +7,7 @@ import {
 } from "../cli/config-file.js";
 import { ensureWorkspaceSession } from "../core/session.js";
 import { connectBus, type BusHandle } from "./bus.js";
-import { colors } from "./theme.js";
+import { colors, glyphs } from "./theme.js";
 import { RoomsScreen } from "./screens/RoomsScreen.js";
 import { RoomScreen } from "./screens/RoomScreen.js";
 import { SetupScreen } from "./screens/SetupScreen.js";
@@ -46,7 +46,7 @@ export function App({ forceSetup = false }: { forceSetup?: boolean }) {
       const { config, corrupt } = loadFileConfig();
       const resolved = resolveConnection(config);
       setConn(resolved);
-      if (corrupt) setNotice("config file was unreadable — please re-enter your details");
+      if (corrupt) setNotice(`config file was unreadable ${glyphs.dash} please re-enter your details`);
       if (forceSetup || !resolved.redisUrl || !resolved.workspace) {
         setPhase("setup");
         return;
@@ -56,7 +56,7 @@ export function App({ forceSetup = false }: { forceSetup?: boolean }) {
         setPhase("ready");
       } catch (e) {
         setNotice(
-          `could not reach Redis at ${resolved.redisUrl} — ${
+          `could not reach Redis at ${resolved.redisUrl} ${glyphs.dash} ${
             e instanceof Error ? e.message : String(e)
           }`,
         );

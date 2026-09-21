@@ -1,20 +1,18 @@
 import { useKeyboard, useRenderer, useTimeline } from "@opentui/react";
 import type { BoxRenderable, TextRenderable } from "@opentui/core";
 import { useEffect, useRef, useState } from "react";
-import { colors } from "./theme.js";
+import { colors, glyphs } from "./theme.js";
 
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-/** Braille spinner for async states — pure text, no renderer animation needed. */
+/** Spinner for async states — braille on capable terminals, ASCII on legacy. */
 export function Spinner({ label }: { label?: string }) {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
+    const t = setInterval(() => setFrame((f) => (f + 1) % glyphs.spinner.length), 80);
     return () => clearInterval(t);
   }, []);
   return (
     <text>
-      <span fg={colors.accent}>{SPINNER_FRAMES[frame]}</span>
+      <span fg={colors.accent}>{glyphs.spinner[frame]}</span>
       {label ? <span fg={colors.muted}> {label}</span> : null}
     </text>
   );
@@ -75,7 +73,7 @@ export function LiveDot({ label = "live" }: { label?: string }) {
   return (
     <box flexDirection="row">
       <text ref={ref} fg={colors.good}>
-        ●
+        {glyphs.dotOn}
       </text>
       <text fg={colors.muted}> {label}</text>
     </box>
@@ -196,7 +194,7 @@ export function ConfirmModal({
     <Modal title={title} width={Math.max(50, Math.min(70, body.length + 12))}>
       <text fg={colors.fg}>{body}</text>
       <box flexDirection="row" gap={2}>
-        <Key k="y/⏎" label={confirmLabel} />
+        <Key k={`y/${glyphs.enter}`} label={confirmLabel} />
         <Key k="n/esc" label="cancel" />
       </box>
     </Modal>
@@ -238,7 +236,7 @@ export function InputModal({
       />
       {hint ? <text fg={colors.muted}>{hint}</text> : null}
       <box flexDirection="row" gap={2}>
-        <Key k="⏎" label="confirm" />
+        <Key k={glyphs.enter} label="confirm" />
         <Key k="esc" label="cancel" />
       </box>
     </Modal>
@@ -277,14 +275,14 @@ export function WorkspaceModal({
         ]}
         focused
         height={Math.min(10, sessions.length + 1)}
-        selectedBackgroundColor={colors.panelAlt}
+        selectedBackgroundColor={colors.select}
         selectedTextColor={colors.accent}
         onSelect={(_i, opt) => {
           if (opt) onPick(String(opt.value));
         }}
       />
       <box flexDirection="row" gap={2}>
-        <Key k="⏎" label="choose" />
+        <Key k={glyphs.enter} label="choose" />
         <Key k="esc" label="cancel" />
       </box>
     </Modal>
@@ -311,7 +309,7 @@ export function PromptModal({
   return (
     <Modal title="Agent join prompt" width={78}>
       <text fg={colors.muted}>
-        Paste this into an agent (Claude Code, Codex, …) to connect it:
+        Paste this into an agent (Claude Code, Codex{glyphs.dots}) to connect it:
       </text>
       <box border borderStyle="single" borderColor={colors.border} padding={1}>
         <text selectable fg={colors.fg}>
@@ -319,7 +317,7 @@ export function PromptModal({
         </text>
       </box>
       <box flexDirection="row" gap={2}>
-        <Key k="c" label={copied ? "copied ✓" : "copy to clipboard"} />
+        <Key k="c" label={copied ? `copied ${glyphs.ok}` : "copy to clipboard"} />
         <Key k="esc" label="close" />
       </box>
     </Modal>

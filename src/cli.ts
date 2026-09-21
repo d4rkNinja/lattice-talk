@@ -107,7 +107,17 @@ async function runTui(tuiArgs: string[]): Promise<number> {
       err(`Failed to start TUI runtime (${runtime.cmd}): ${e.message}`);
       resolve(1);
     });
-    child.on("exit", (code) => resolve(code ?? 0));
+    child.on("exit", (code) => {
+      if (code !== null && code !== 0 && code !== 130) {
+        err(
+          "The TUI exited unexpectedly — this terminal may not support its " +
+            "native renderer (common on older Windows consoles and minimal " +
+            "terminal emulators). `lattice-talk serve` and the MCP tools " +
+            "still work on any terminal.",
+        );
+      }
+      resolve(code ?? 0);
+    });
   });
 }
 

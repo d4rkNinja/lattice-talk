@@ -18,7 +18,7 @@ import {
   type RoomInfo,
 } from "../bus.js";
 import { FadeIn, Footer, Header, Key, LiveDot, PromptModal } from "../components.js";
-import { colors, kindColor } from "../theme.js";
+import { colors, glyphs, kindColor } from "../theme.js";
 
 function wrap(body: string, width: number): string[] {
   const words = body.split(/\s+/);
@@ -46,7 +46,7 @@ function MessageLine({
   animate: boolean;
 }) {
   const head = ` ${formatTime(m.ts)}  ${m.from}`;
-  const tag = ` · ${m.role}${m.harness && m.harness !== "unknown" ? `/${m.harness}` : ""}${m.kind !== "chat" ? ` · ${m.kind}` : ""}`;
+  const tag = ` ${glyphs.sep} ${m.role}${m.harness && m.harness !== "unknown" ? `/${m.harness}` : ""}${m.kind !== "chat" ? ` ${glyphs.sep} ${m.kind}` : ""}`;
   const bodyWidth = Math.max(20, width - 4);
   const inner = (
     <>
@@ -221,10 +221,10 @@ export function RoomScreen({
           >
             {messages.length === 0 ? (
               <box padding={1} flexDirection="column" gap={1}>
-                <LiveDot label={`watching #${roomId} — no messages yet`} />
+                <LiveDot label={`watching #${roomId} ${glyphs.dash} no messages yet`} />
                 <text fg={colors.muted}>
                   Press <span fg={colors.accent}>p</span> for a prompt to paste
-                  into an agent — it will join and start talking here.
+                  into an agent {glyphs.dash} it will join and start talking here.
                 </text>
               </box>
             ) : (
@@ -254,11 +254,11 @@ export function RoomScreen({
           >
             {rooms.map((r) => (
               <text key={r.id} fg={r.id === roomId ? colors.accent : colors.muted}>
-                {r.id === roomId ? "▸ " : "  "}#{r.id}
+                {r.id === roomId ? `${glyphs.pointer} ` : "  "}#{r.id}
               </text>
             ))}
             <text fg={colors.dim}> </text>
-            <text fg={colors.dim}>←→ switch room</text>
+            <text fg={colors.dim}>{glyphs.leftright} switch room</text>
           </box>
           <box
             border
@@ -281,7 +281,7 @@ export function RoomScreen({
                   <>
                     <text>
                       <span fg={p.online ? colors.good : colors.dim}>
-                        {p.online ? "● " : "○ "}
+                        {p.online ? `${glyphs.dotOn} ` : `${glyphs.dotOff} `}
                       </span>
                       <span fg={p.online ? colors.fg : colors.muted}>
                         {p.display_name}
@@ -289,8 +289,8 @@ export function RoomScreen({
                     </text>
                     <text fg={colors.dim}>
                       {"    "}
-                      {p.agent_id} · {p.role}
-                      {p.harness !== "unknown" ? ` · ${p.harness}` : ""}
+                      {p.agent_id} {glyphs.sep} {p.role}
+                      {p.harness !== "unknown" ? ` ${glyphs.sep} ${p.harness}` : ""}
                     </text>
                   </>
                 );
@@ -310,8 +310,8 @@ export function RoomScreen({
       </box>
       <Footer>
         <Key k="b/esc" label="rooms" />
-        <Key k="←→" label="switch room" />
-        <Key k="↑↓" label="scroll" />
+        <Key k={glyphs.leftright} label="switch room" />
+        <Key k={glyphs.updown} label="scroll" />
         <Key k="f" label="follow" />
         <Key k="p" label="prompt" />
       </Footer>

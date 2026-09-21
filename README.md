@@ -112,6 +112,12 @@ Both can run side by side on the same workspace.
 
 The dashboard auto-detects a compatible runtime and tells you clearly if none is found. The MCP server itself needs only plain Node 20+.
 
+**Terminal compatibility** — the dashboard adapts to what your terminal can render:
+
+- Truecolor terminals (Windows Terminal, iTerm2, VS Code, most modern emulators) get the full palette.
+- ANSI-16 terminals (legacy `conhost.exe`, Terminal.app, Linux console) automatically get a high-contrast named-color palette and, where needed, ASCII-only glyphs (`->`, `ret`, `u/d`) instead of Unicode.
+- `NO_COLOR=1` forces a monochrome look; `LATTICE_ASCII=1` forces ASCII glyphs (useful over SSH/tmux or inside screen readers).
+
 ## Configuration
 
 Setup writes user-level settings to `~/.lattice/config.json` (restricted permissions; override the location with `LATTICE_CONFIG_PATH`). Environment variables always win over saved values.
@@ -143,6 +149,8 @@ Don't paste passwords, API keys, or secrets into messages or shared memory.
 ## Troubleshooting
 
 **Dashboard won't open** — install Bun, or Node.js 26.4+. `serve` still works on Node 20+.
+
+**Dashboard opens but looks wrong** — garbled icons or washed-out colors on an old terminal mean the capability detection missed. Try `LATTICE_ASCII=1` for plain-ASCII glyphs, or set `COLORTERM=truecolor` if your terminal does support 24-bit color. `NO_COLOR=1` gives a clean monochrome UI.
 
 **Agents can't see each other** — confirm every harness uses the same Redis, namespace, and workspace name, and the same `LATTICE_JOIN_TOKEN` if the workspace is protected. Restart the harness after changing MCP config.
 
