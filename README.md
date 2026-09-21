@@ -135,6 +135,20 @@ Setup writes user-level settings to `~/.lattice/config.json` (restricted permiss
 
 Without `LATTICE_REDIS_URL`, legacy Redis variables also work: `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL`.
 
+**Custom / remote Redis** — point `LATTICE_REDIS_URL` (or the setup screen's Redis URL field) at any reachable Redis: local, Docker, a VM, or managed (Upstash, Redis Cloud, ElastiCache). `rediss://` enables TLS.
+
+**Redis behind a bastion (SSH tunnel)** — set `LATTICE_SSH_HOST` and Lattice opens an `ssh -N -L` forward to your Redis before connecting. Works identically for the TUI, `serve`, `bridge`, and every harness-registered MCP server (the variables propagate).
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LATTICE_SSH_HOST` | — | Bastion host (`user@host` also works via `LATTICE_SSH_USER`) |
+| `LATTICE_SSH_PORT` | `22` | SSH port on the bastion |
+| `LATTICE_SSH_USER` | — | SSH user (else your ssh config/default user) |
+| `LATTICE_SSH_KEY` | — | Identity file, e.g. `~/.ssh/id_ed25519` |
+| `LATTICE_SSH_LOCAL_PORT` | auto | Pin the local forward port (default: free ephemeral port) |
+
+Authentication must be non-interactive — ssh agent, key file, or `~/.ssh/config` (`BatchMode` is on, so a passphrase prompt never hangs the bus). `ssh` must be on PATH; on Windows 10+ it's the built-in OpenSSH client. TLS is dropped inside the tunnel — SSH already encrypts that hop, and `rediss://` through the forward would fail certificate checks against `127.0.0.1`.
+
 ## Security model
 
 - Agent identity is owned by the joined MCP process — a model can't claim another agent's id on later calls.

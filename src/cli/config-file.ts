@@ -13,6 +13,11 @@ export interface FileConfig {
   /** Session id the TUI treats as the workspace (rooms live inside it). */
   workspace?: string;
   joinToken?: string;
+  /** Optional SSH bastion for reaching Redis — advanced, env/config only. */
+  sshHost?: string;
+  sshPort?: string;
+  sshUser?: string;
+  sshKey?: string;
 }
 
 export interface ResolvedConnection {
@@ -20,6 +25,10 @@ export interface ResolvedConnection {
   namespace: string;
   workspace?: string;
   joinToken?: string;
+  sshHost?: string;
+  sshPort?: string;
+  sshUser?: string;
+  sshKey?: string;
 }
 
 export function configFilePath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
@@ -47,6 +56,10 @@ export function loadFileConfig(
     if (typeof raw.namespace === "string" && raw.namespace.trim()) config.namespace = raw.namespace.trim();
     if (typeof raw.workspace === "string" && raw.workspace.trim()) config.workspace = raw.workspace.trim();
     if (typeof raw.joinToken === "string" && raw.joinToken.trim()) config.joinToken = raw.joinToken.trim();
+    if (typeof raw.sshHost === "string" && raw.sshHost.trim()) config.sshHost = raw.sshHost.trim();
+    if (typeof raw.sshPort === "string" && raw.sshPort.trim()) config.sshPort = raw.sshPort.trim();
+    if (typeof raw.sshUser === "string" && raw.sshUser.trim()) config.sshUser = raw.sshUser.trim();
+    if (typeof raw.sshKey === "string" && raw.sshKey.trim()) config.sshKey = raw.sshKey.trim();
     return { path, config, exists: true, corrupt: false };
   } catch {
     return { path, config: {}, exists: true, corrupt: true };
@@ -65,6 +78,10 @@ export function saveFileConfig(
   if (config.namespace?.trim()) clean.namespace = config.namespace.trim();
   if (config.workspace?.trim()) clean.workspace = config.workspace.trim();
   if (config.joinToken?.trim()) clean.joinToken = config.joinToken.trim();
+  if (config.sshHost?.trim()) clean.sshHost = config.sshHost.trim();
+  if (config.sshPort?.trim()) clean.sshPort = config.sshPort.trim();
+  if (config.sshUser?.trim()) clean.sshUser = config.sshUser.trim();
+  if (config.sshKey?.trim()) clean.sshKey = config.sshKey.trim();
   writeFileSync(path, `${JSON.stringify(clean, null, 2)}\n`, { mode: 0o600 });
   return path;
 }
@@ -79,6 +96,10 @@ export function resolveConnection(
     namespace: env.LATTICE_NAMESPACE?.trim() || file.namespace || "dev",
     workspace: env.LATTICE_DEFAULT_SESSION_ID?.trim() || file.workspace,
     joinToken: env.LATTICE_JOIN_TOKEN?.trim() || file.joinToken,
+    sshHost: env.LATTICE_SSH_HOST?.trim() || file.sshHost,
+    sshPort: env.LATTICE_SSH_PORT?.trim() || file.sshPort,
+    sshUser: env.LATTICE_SSH_USER?.trim() || file.sshUser,
+    sshKey: env.LATTICE_SSH_KEY?.trim() || file.sshKey,
   };
 }
 
@@ -92,6 +113,10 @@ export function connectionToEnv(conn: ResolvedConnection): Record<string, string
   if (conn.namespace) env.LATTICE_NAMESPACE = conn.namespace;
   if (conn.workspace) env.LATTICE_DEFAULT_SESSION_ID = conn.workspace;
   if (conn.joinToken) env.LATTICE_JOIN_TOKEN = conn.joinToken;
+  if (conn.sshHost) env.LATTICE_SSH_HOST = conn.sshHost;
+  if (conn.sshPort) env.LATTICE_SSH_PORT = conn.sshPort;
+  if (conn.sshUser) env.LATTICE_SSH_USER = conn.sshUser;
+  if (conn.sshKey) env.LATTICE_SSH_KEY = conn.sshKey;
   return env;
 }
 
@@ -107,6 +132,10 @@ const HARNESS_ENV_KEYS = [
   "REDIS_PASSWORD",
   "REDIS_DB",
   "REDIS_SSL",
+  "LATTICE_SSH_HOST",
+  "LATTICE_SSH_PORT",
+  "LATTICE_SSH_USER",
+  "LATTICE_SSH_KEY",
   "LATTICE_PRESENCE_TTL",
   "LATTICE_STREAM_MAXLEN",
   "OTEL_EXPORTER_OTLP_ENDPOINT",

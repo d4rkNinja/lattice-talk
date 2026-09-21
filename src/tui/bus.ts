@@ -22,6 +22,10 @@ export async function connectBus(conn: ResolvedConnection): Promise<BusHandle> {
   };
   if (conn.joinToken) env.LATTICE_JOIN_TOKEN = conn.joinToken;
   if (conn.workspace) env.LATTICE_DEFAULT_SESSION_ID = conn.workspace;
+  if (conn.sshHost) env.LATTICE_SSH_HOST = conn.sshHost;
+  if (conn.sshPort) env.LATTICE_SSH_PORT = conn.sshPort;
+  if (conn.sshUser) env.LATTICE_SSH_USER = conn.sshUser;
+  if (conn.sshKey) env.LATTICE_SSH_KEY = conn.sshKey;
   const config = loadConfig(env);
   const store = await createStore(config);
   return {

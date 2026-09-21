@@ -2,6 +2,7 @@ import type { LatticeConfig } from "./config.js";
 import { hasRedisTarget } from "./config.js";
 import { MemoryStore } from "./memory-store.js";
 import { RedisStore } from "./redis.js";
+import { openSshTunnel, tunneledConfig } from "./ssh-tunnel.js";
 import type { AgentRecord, RoomMeta, SessionMeta, StreamEntry } from "./types.js";
 
 export interface Store {
@@ -104,5 +105,26 @@ export async function createStore(
       "LATTICE_STORE=redis requires LATTICE_REDIS_URL or REDIS_HOST. Use LATTICE_STORE=memory for single-process smoke tests.",
     );
   }
-  return RedisStore.connect(config);
+  // LATTICE_SSH_HOST routes Redis through an `ssh -N -L` forward; the tunnel
+  // lifetime is bound to the store so every entry point (serve, TUI, bridge)
+  // behaves identically.
+  const tunnel = await openSshTunnel(config);
+  if (!tunnel) {
+    return RedisStore.connect(config);
+  }
+  try {
+    const store = await RedisStore.connect(tunneledConfig(config, tunnel.localPort));
+    const closeStore = store.close.bind(store);
+    store.close = async () => {
+      try {
+        await closeStore();
+      } finally {
+        await tunnel.close();
+      }
+    };
+    return store;
+  } catch (e) {
+    await tunnel.close();
+    throw e;
+  }
 }

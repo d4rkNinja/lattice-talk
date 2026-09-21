@@ -22,6 +22,12 @@ export interface LatticeConfig {
   redisPassword?: string;
   redisDb: number;
   redisSsl: boolean;
+  /** SSH bastion for the Redis target — see core/ssh-tunnel.ts. */
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshKey?: string;
+  sshLocalPort?: number;
   otelEndpoint?: string;
   otelServiceName: string;
   otelHeaders?: Record<string, string>;
@@ -124,6 +130,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LatticeConfig 
     redisPassword: env.REDIS_PASSWORD || undefined,
     redisDb: envIntInRange(env, "REDIS_DB", 0, 0, 9999),
     redisSsl: envFlag(env.REDIS_SSL) || sslFromUrl,
+    sshHost: env.LATTICE_SSH_HOST?.trim() || undefined,
+    sshPort: envPort(env, "LATTICE_SSH_PORT", 22),
+    sshUser: env.LATTICE_SSH_USER?.trim() || undefined,
+    sshKey: env.LATTICE_SSH_KEY?.trim() || undefined,
+    sshLocalPort: envPort(env, "LATTICE_SSH_LOCAL_PORT", 0) || undefined,
     otelEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim() || undefined,
     otelServiceName: (env.OTEL_SERVICE_NAME ?? "lattice-talk").trim() || "lattice-talk",
     otelHeaders: parseOtelHeaders(env.OTEL_EXPORTER_OTLP_HEADERS),
