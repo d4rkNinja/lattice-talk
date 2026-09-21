@@ -59,6 +59,22 @@ export const keys = {
   memoryMeta(ns: string, sid: string, key: string): string {
     return `lattice:${ns}:memory:${sessionTag(sid)}:meta:${key}`;
   },
+  /**
+   * Pub/sub wake-up channels. Payloads are small hints only — streams remain
+   * the source of truth, so a missed notify only delays a waiter until its
+   * timeout or next poll.
+   */
+  notifyRoom(ns: string, sid: string, rid: string): string {
+    return `lattice:${ns}:notify:${sessionTag(sid)}:room:${rid}`;
+  },
+  /** DM delivery channel — one per recipient agent. */
+  notifyDm(ns: string, sid: string, agentId: string): string {
+    return `lattice:${ns}:notify:${sessionTag(sid)}:dm:${agentId}`;
+  },
+  /** Session roster/room-list changes (join, leave, room create/delete). */
+  notifyMeta(ns: string, sid: string): string {
+    return `lattice:${ns}:notify:${sessionTag(sid)}:meta`;
+  },
 };
 
 export type KeyBuilder = typeof keys;

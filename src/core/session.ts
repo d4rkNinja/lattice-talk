@@ -11,6 +11,8 @@ import {
   ROLE_MAX_CHARS,
   SESSION_ROOMS_CAP,
 } from "./limits.js";
+import { keys } from "./keys.js";
+import { publishNotify } from "./notify.js";
 import { clampListLimit, pageSortedKeys } from "./page.js";
 import { refreshPresence } from "./presence.js";
 import {
@@ -181,6 +183,10 @@ export async function joinSession(
   await ensureMainRoom(deps, sessionId, agent.agent_id);
   await refreshPresence(deps, sessionId, agent.agent_id);
   deps.ctx.rememberJoin(sessionId, agent);
+  await publishNotify(deps.store, keys.notifyMeta(deps.config.namespace, sessionId), {
+    type: "agents",
+    agent_id: agent.agent_id,
+  });
 
   const peers = await listPeers(deps, { session_id: sessionId });
   return {
@@ -205,6 +211,10 @@ export async function leaveSession(
   await deps.store.clearAgentState(sessionId, agentId);
   await deps.store.removeAgent(sessionId, agentId);
   deps.ctx.clearIf(sessionId, agentId);
+  await publishNotify(deps.store, keys.notifyMeta(deps.config.namespace, sessionId), {
+    type: "agents",
+    agent_id: agentId,
+  });
   return { left: true, session_id: sessionId, agent_id: agentId };
 }
 

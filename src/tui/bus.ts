@@ -93,6 +93,35 @@ export async function pollRoomMessages(
   return { messages, lastId: last ? last.id : afterId };
 }
 
+/**
+ * Live room feed: fires `onWake` when a message lands in this room or the
+ * session's roster/room list changes. Streams stay the source of truth — the
+ * caller re-reads on each wake.
+ */
+export function subscribeRoomFeed(
+  bus: BusHandle,
+  sessionId: string,
+  roomId: string,
+  onWake: () => void,
+): Promise<() => Promise<void>> {
+  const ns = bus.config.namespace;
+  return bus.store.subscribe(
+    [keys.notifyRoom(ns, sessionId, roomId), keys.notifyMeta(ns, sessionId)],
+    () => onWake(),
+  );
+}
+
+/** Session-level changes only (rooms created/deleted, agents join/leave). */
+export function subscribeSessionMeta(
+  bus: BusHandle,
+  sessionId: string,
+  onWake: () => void,
+): Promise<() => Promise<void>> {
+  return bus.store.subscribe([keys.notifyMeta(bus.config.namespace, sessionId)], () =>
+    onWake(),
+  );
+}
+
 export function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "??:??:??";

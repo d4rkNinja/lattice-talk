@@ -140,6 +140,15 @@ export const pullMessagesSchema = z.object({
     .max(200)
     .optional()
     .describe("Max messages to return. Default 50, max 200."),
+  wait_ms: z
+    .coerce.number()
+    .int()
+    .min(0)
+    .max(30000)
+    .optional()
+    .describe(
+      "Block up to this many ms waiting for a new message (push wake-up, not polling). 0 or omitted returns immediately. Max 30000.",
+    ),
 });
 
 export const createRoomSchema = z.object({

@@ -12,6 +12,7 @@ import {
   listPeersView,
   listRoomsInfo,
   pollRoomMessages,
+  subscribeRoomFeed,
   type BusHandle,
   type PeerView,
   type RoomInfo,
@@ -100,9 +101,23 @@ export function RoomScreen({
     lastIdRef.current = "0";
     setMessages([]);
     void refresh();
-    const t = setInterval(() => void refresh(), 1000);
-    return () => clearInterval(t);
-  }, [refresh]);
+    // Push-driven refresh; the slow interval is only a safety net for a
+    // dropped notify or a reconnect.
+    let cancelled = false;
+    let unsub: (() => Promise<void>) | undefined;
+    subscribeRoomFeed(bus, workspace, roomId, () => void refresh())
+      .then((u) => {
+        if (cancelled) void u();
+        else unsub = u;
+      })
+      .catch(() => {});
+    const t = setInterval(() => void refresh(), 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+      void unsub?.();
+    };
+  }, [bus, refresh, roomId, workspace]);
 
   useKeyboard((key) => {
     if (promptOpen) return;

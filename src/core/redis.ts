@@ -2,6 +2,7 @@ import Redis from "ioredis";
 import type { LatticeConfig } from "./config.js";
 import { keys, sessionTag } from "./keys.js";
 import { log, redactUrl } from "../log.js";
+import { publishNotify } from "./notify.js";
 import { exclusiveStart } from "./stream.js";
 import type { Store } from "./store.js";
 import type { AgentRecord, RoomMeta, SessionMeta, StreamEntry } from "./types.js";
@@ -124,6 +125,9 @@ export function createRedisClient(config: LatticeConfig): Redis {
 
 export class RedisStore implements Store {
   readonly kind = "redis" as const;
+  // A connection in subscriber mode can run no other commands, so it is a
+  // dedicated duplicate created on first subscribe.
+  private subClient?: Redis;
 
   constructor(
     private readonly redis: Redis,
@@ -286,6 +290,10 @@ export class RedisStore implements Store {
       }
     }
     await pipeline.exec();
+    await publishNotify(this, keys.notifyMeta(this.ns, sessionId), {
+      type: "rooms",
+      room_id: roomId,
+    });
   }
 
   async getRoomMeta(sessionId: string, roomId: string): Promise<RoomMeta | null> {
@@ -440,7 +448,44 @@ export class RedisStore implements Store {
     }
   }
 
+  async publish(channel: string, payload: string): Promise<void> {
+    await this.redis.publish(channel, payload);
+  }
+
+  async subscribe(
+    channels: string[],
+    onMessage: (channel: string, payload: string) => void,
+  ): Promise<() => Promise<void>> {
+    if (channels.length === 0) return async () => {};
+    if (!this.subClient) {
+      this.subClient = this.redis.duplicate();
+      this.subClient.on("error", (err) => {
+        log("redis sub error", err.message);
+      });
+    }
+    const sub = this.subClient;
+    sub.on("message", onMessage);
+    await sub.subscribe(...channels);
+    return async () => {
+      sub.off("message", onMessage);
+      try {
+        await sub.unsubscribe(...channels);
+      } catch {
+        // Connection already gone — nothing to unsubscribe.
+      }
+    };
+  }
+
   async close(): Promise<void> {
+    const sub = this.subClient;
+    this.subClient = undefined;
+    if (sub) {
+      try {
+        await sub.quit();
+      } catch {
+        sub.disconnect();
+      }
+    }
     try {
       await this.redis.quit();
     } catch {

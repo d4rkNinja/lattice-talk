@@ -25,3 +25,4 @@ export const PRESENCE_TTL_MIN_SECONDS = 5;
 export const PRESENCE_TTL_MAX_SECONDS = 86_400;
 export const STREAM_MAXLEN_MIN = 10;
 export const STREAM_MAXLEN_MAX = 1_000_000;
+export const PULL_WAIT_MAX_MS = 30_000;

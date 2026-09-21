@@ -1,4 +1,6 @@
+import { EventEmitter } from "node:events";
 import { keys, sessionTag } from "./keys.js";
+import { publishNotify } from "./notify.js";
 import { isAfterCursor } from "./stream.js";
 import type { Store } from "./store.js";
 import type { AgentRecord, RoomMeta, SessionMeta, StreamEntry } from "./types.js";
@@ -19,11 +21,15 @@ export class MemoryStore implements Store {
   private readonly strings = new Map<string, StringValue>();
   private readonly streams = new Map<string, StreamEntry[]>();
   private readonly streamSeq = new Map<string, number>();
+  private readonly events = new EventEmitter();
 
   constructor(
     private readonly ns: string,
     private readonly clock: () => number = Date.now,
-  ) {}
+  ) {
+    // One listener per subscribed waiter — no meaningful cap in-process.
+    this.events.setMaxListeners(0);
+  }
 
   private now(): number {
     return this.clock();
@@ -212,6 +218,10 @@ export class MemoryStore implements Store {
       const rid = key.slice(cursorPrefix.length).split(":").slice(1).join(":");
       if (rid === roomId) this.strings.delete(key);
     }
+    await publishNotify(this, keys.notifyMeta(this.ns, sessionId), {
+      type: "rooms",
+      room_id: roomId,
+    });
   }
 
   async getRoomMeta(sessionId: string, roomId: string): Promise<RoomMeta | null> {
@@ -356,7 +366,28 @@ export class MemoryStore implements Store {
     return true;
   }
 
+  async publish(channel: string, payload: string): Promise<void> {
+    this.events.emit(channel, payload);
+  }
+
+  async subscribe(
+    channels: string[],
+    onMessage: (channel: string, payload: string) => void,
+  ): Promise<() => Promise<void>> {
+    const listeners = channels.map((channel) => {
+      const handler = (payload: string) => onMessage(channel, payload);
+      this.events.on(channel, handler);
+      return { channel, handler };
+    });
+    return async () => {
+      for (const { channel, handler } of listeners) {
+        this.events.off(channel, handler);
+      }
+    };
+  }
+
   async close(): Promise<void> {
+    this.events.removeAllListeners();
     this.hashes.clear();
     this.sets.clear();
     this.strings.clear();

@@ -7,7 +7,9 @@ import {
   MESSAGE_BODY_MAX_CHARS,
   PULL_DEFAULT_LIMIT,
   PULL_MAX_LIMIT,
+  PULL_WAIT_MAX_MS,
 } from "./limits.js";
+import { publishNotify, waitForNotify } from "./notify.js";
 import { requireJoinedSession } from "./resolve.js";
 import { assertRoomMember } from "./rooms.js";
 import { compareStreamIds } from "./stream.js";
@@ -21,6 +23,12 @@ export function clampPullLimit(limit: number | undefined): number {
   const n = limit ?? PULL_DEFAULT_LIMIT;
   if (!Number.isFinite(n)) return PULL_DEFAULT_LIMIT;
   return Math.min(PULL_MAX_LIMIT, Math.max(1, Math.floor(n)));
+}
+
+export function clampWaitMs(waitMs: number | undefined): number {
+  const n = waitMs ?? 0;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(PULL_WAIT_MAX_MS, Math.floor(n));
 }
 
 export function truncateBody(
@@ -120,6 +128,12 @@ export async function tellRoom(
     fields,
     deps.config.streamMaxLen,
   );
+  await publishNotify(deps.store, keys.notifyRoom(deps.config.namespace, sessionId, roomId), {
+    type: "message",
+    room_id: roomId,
+    id: messageId,
+    from: agentId,
+  });
   return { message_id: messageId, room_id: roomId, session_id: sessionId };
 }
 
@@ -157,6 +171,13 @@ export async function tellAgent(
     fields,
     deps.config.streamMaxLen,
   );
+  // Only the recipient's DM channel fires — DMs don't wake other agents.
+  await publishNotify(deps.store, keys.notifyDm(deps.config.namespace, sessionId, to), {
+    type: "dm",
+    pair,
+    id: messageId,
+    from,
+  });
   return { message_id: messageId, pair, session_id: sessionId };
 }
 
@@ -200,19 +221,65 @@ export async function pullMessages(
     inbox?: boolean;
     other_agent_id?: string;
     limit?: number;
+    wait_ms?: number;
   },
 ): Promise<PullResult> {
   const { sessionId, agentId } = await requireJoinedSession(deps, input.session_id);
 
   const limit = clampPullLimit(input.limit);
+  const waitMs = clampWaitMs(input.wait_ms);
   const inbox =
     input.inbox === true || input.room_id === "inbox" || Boolean(input.other_agent_id);
 
   if (inbox) {
-    return pullInbox(deps, sessionId, agentId, input.other_agent_id, limit);
+    const channels = [keys.notifyDm(deps.config.namespace, sessionId, agentId)];
+    return pullWithWait(deps, waitMs, channels, () =>
+      pullInbox(deps, sessionId, agentId, input.other_agent_id, limit),
+    );
   }
 
   const roomId = assertId(input.room_id?.trim() || DEFAULT_ROOM, "room_id");
+  const channels = [keys.notifyRoom(deps.config.namespace, sessionId, roomId)];
+  return pullWithWait(deps, waitMs, channels, () =>
+    pullRoomStream(deps, sessionId, agentId, roomId, limit),
+  );
+}
+
+/**
+ * Pull, and when nothing is new optionally block until a pub/sub wake-up
+ * fires (a sender just wrote) or waitMs lapses. The post-subscribe recheck
+ * inside waitForNotify closes the subscribe window so no message is missed.
+ */
+async function pullWithWait(
+  deps: BusDeps,
+  waitMs: number,
+  channels: string[],
+  pullNow: () => Promise<PullResult>,
+): Promise<PullResult> {
+  const first = await pullNow();
+  if (waitMs <= 0 || first.messages.length > 0) return first;
+
+  let buffered: PullResult | undefined;
+  const notified = await waitForNotify(deps.store, channels, waitMs, async () => {
+    const recheck = await pullNow();
+    if (recheck.messages.length > 0) {
+      buffered = recheck;
+      return true;
+    }
+    return false;
+  });
+  if (buffered) return buffered;
+  if (!notified) return first;
+  return pullNow();
+}
+
+async function pullRoomStream(
+  deps: BusDeps,
+  sessionId: string,
+  agentId: string,
+  roomId: string,
+  limit: number,
+): Promise<PullResult> {
   const meta = await deps.store.getRoomMeta(sessionId, roomId);
   if (!meta) {
     throw new UserError(`Room ${roomId} does not exist. Create it with create_room first.`);

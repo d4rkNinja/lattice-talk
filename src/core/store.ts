@@ -74,6 +74,20 @@ export interface Store {
   appendNote(sessionId: string, fields: Record<string, string>): Promise<string>;
   readNotes(sessionId: string, afterId: string, limit: number): Promise<StreamEntry[]>;
 
+  /**
+   * Publish a wake-up payload on a notify channel. Fire-and-forget: payloads
+   * are hints, streams are the source of truth.
+   */
+  publish(channel: string, payload: string): Promise<void>;
+  /**
+   * Subscribe to notify channels; resolves with an unsubscribe function.
+   * Used for long-poll wake-ups (pull_messages wait_ms) and the TUI live feed.
+   */
+  subscribe(
+    channels: string[],
+    onMessage: (channel: string, payload: string) => void,
+  ): Promise<() => Promise<void>>;
+
   ping(): Promise<boolean>;
   close(): Promise<void>;
 }

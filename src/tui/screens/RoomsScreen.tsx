@@ -4,7 +4,13 @@ import { agentJoinPrompt } from "../../cli/prompt.js";
 import { saveFileConfig, type ResolvedConnection } from "../../cli/config-file.js";
 import { ensureRoom } from "../../core/rooms.js";
 import { ensureWorkspaceSession } from "../../core/session.js";
-import { listPeersView, listRoomsInfo, type BusHandle, type RoomInfo } from "../bus.js";
+import {
+  listPeersView,
+  listRoomsInfo,
+  subscribeSessionMeta,
+  type BusHandle,
+  type RoomInfo,
+} from "../bus.js";
 import {
   ConfirmModal,
   Footer,
@@ -65,9 +71,22 @@ export function RoomsScreen({
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => void refresh(), 2000);
-    return () => clearInterval(t);
-  }, [refresh]);
+    // Room/agent changes wake us via pub/sub; the interval is a safety net.
+    let cancelled = false;
+    let unsub: (() => Promise<void>) | undefined;
+    subscribeSessionMeta(bus, workspace, () => void refresh())
+      .then((u) => {
+        if (cancelled) void u();
+        else unsub = u;
+      })
+      .catch(() => {});
+    const t = setInterval(() => void refresh(), 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+      void unsub?.();
+    };
+  }, [bus, refresh, workspace]);
 
   const createRoom = async (name: string) => {
     try {

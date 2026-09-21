@@ -1,6 +1,8 @@
 import { UserError } from "./errors.js";
 import { assertBoundedText, assertId } from "./ids.js";
+import { keys } from "./keys.js";
 import { DEFAULT_ROOM, DISPLAY_NAME_MAX_CHARS } from "./limits.js";
+import { publishNotify } from "./notify.js";
 import { requireJoinedSession } from "./resolve.js";
 import type { BusDeps, RoomMeta } from "./types.js";
 
@@ -43,6 +45,12 @@ export async function ensureRoom(
   };
   const created = await deps.store.addRoom(sessionId, rid, meta);
   const finalMeta = (await deps.store.getRoomMeta(sessionId, rid)) ?? meta;
+  if (created) {
+    await publishNotify(deps.store, keys.notifyMeta(deps.config.namespace, sessionId), {
+      type: "rooms",
+      room_id: rid,
+    });
+  }
   return { created, meta: finalMeta };
 }
 
@@ -87,5 +95,9 @@ export async function joinRoom(
   }
   await deps.store.addRoomMember(sessionId, roomId, agentId);
   const members = await deps.store.listRoomMembers(sessionId, roomId);
+  await publishNotify(deps.store, keys.notifyMeta(deps.config.namespace, sessionId), {
+    type: "rooms",
+    room_id: roomId,
+  });
   return { room_id: roomId, members: members.length, session_id: sessionId };
 }
