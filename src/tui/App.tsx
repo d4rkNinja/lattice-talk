@@ -11,7 +11,7 @@ import { colors } from "./theme.js";
 import { RoomsScreen } from "./screens/RoomsScreen.js";
 import { RoomScreen } from "./screens/RoomScreen.js";
 import { SetupScreen } from "./screens/SetupScreen.js";
-import { Spinner } from "./components.js";
+import { FadeIn, Logo, Spinner } from "./components.js";
 
 type View =
   | { type: "rooms" }
@@ -81,7 +81,12 @@ export function App({ forceSetup = false }: { forceSetup?: boolean }) {
         backgroundColor={colors.bg}
         justifyContent="center"
         alignItems="center"
+        flexDirection="column"
+        gap={1}
       >
+        <FadeIn duration={350}>
+          <Logo />
+        </FadeIn>
         <Spinner label="connecting to your bus" />
       </box>
     );

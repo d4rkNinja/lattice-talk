@@ -2,7 +2,7 @@ import { useKeyboard } from "@opentui/react";
 import { useState } from "react";
 import { saveFileConfig, type ResolvedConnection } from "../../cli/config-file.js";
 import { pingBus } from "../bus.js";
-import { Footer, Header, Key, Spinner } from "../components.js";
+import { FadeIn, Footer, Header, Key, Logo, Spinner } from "../components.js";
 import { colors } from "../theme.js";
 
 interface Field {
@@ -95,7 +95,11 @@ export function SetupScreen({
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={colors.bg}>
       <Header left="guided setup" right="lattice-talk" />
-      <box flexGrow={1} justifyContent="center" alignItems="center">
+      <box flexGrow={1} justifyContent="center" alignItems="center" flexDirection="column">
+        <FadeIn duration={280} marginBottom={1}>
+          <Logo />
+        </FadeIn>
+        <FadeIn duration={240} slide={1}>
         <box
           border
           borderStyle="rounded"
@@ -157,6 +161,7 @@ export function SetupScreen({
           </box>
           {error ? <text fg={colors.bad}>✗ {error}</text> : null}
         </box>
+        </FadeIn>
       </box>
       <Footer>
         <Key k="tab/↑↓" label="move" />

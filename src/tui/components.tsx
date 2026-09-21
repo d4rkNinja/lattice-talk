@@ -50,6 +50,13 @@ export function FadeIn({
   );
 }
 
+/** ASCII-art wordmark for splash/setup screens. */
+export function Logo({ font = "tiny" }: { font?: "tiny" | "block" | "slick" }) {
+  return (
+    <ascii-font text="lattice" font={font} color={colors.accent} selectable={false} />
+  );
+}
+
 /** Pulsing accent dot — a subtle "live" indicator. */
 export function LiveDot({ label = "live" }: { label?: string }) {
   const ref = useRef<TextRenderable | null>(null);

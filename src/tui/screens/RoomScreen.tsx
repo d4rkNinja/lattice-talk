@@ -97,6 +97,8 @@ export function RoomScreen({
   const lastIdRef = useRef("0");
   // Ids in the first loaded page render flat; anything after animates in.
   const initialIdsRef = useRef<Set<string> | null>(null);
+  // Same for the peer roster — agents present at first load render flat.
+  const initialPeersRef = useRef<Set<string> | null>(null);
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
 
   const refresh = useCallback(async () => {
@@ -114,6 +116,9 @@ export function RoomScreen({
       } else if (firstLoad) {
         initialIdsRef.current = new Set();
       }
+      if (initialPeersRef.current === null) {
+        initialPeersRef.current = new Set(p.map((x) => x.agent_id));
+      }
       setRooms(r);
       setPeers(p);
     } catch {
@@ -124,6 +129,7 @@ export function RoomScreen({
   useEffect(() => {
     lastIdRef.current = "0";
     initialIdsRef.current = null;
+    initialPeersRef.current = null;
     setMessages([]);
     void refresh();
     // Push-driven refresh; the slow interval is only a safety net for a
@@ -183,6 +189,12 @@ export function RoomScreen({
         right={<LiveDot label="live feed (view only)" />}
       />
       <box flexDirection="row" flexGrow={1} padding={1} gap={1}>
+        <FadeIn
+          key={roomId}
+          flexGrow={1}
+          flexDirection="column"
+          duration={140}
+        >
         <box
           border
           borderStyle="rounded"
@@ -209,7 +221,7 @@ export function RoomScreen({
           >
             {messages.length === 0 ? (
               <box padding={1} flexDirection="column" gap={1}>
-                <text fg={colors.muted}>No messages in #{roomId} yet.</text>
+                <LiveDot label={`watching #${roomId} — no messages yet`} />
                 <text fg={colors.muted}>
                   Press <span fg={colors.accent}>p</span> for a prompt to paste
                   into an agent — it will join and start talking here.
@@ -229,6 +241,7 @@ export function RoomScreen({
             )}
           </scrollbox>
         </box>
+        </FadeIn>
         <box flexDirection="column" width={sidebarW} gap={1}>
           <box
             border
@@ -260,23 +273,37 @@ export function RoomScreen({
             {peers.length === 0 ? (
               <text fg={colors.muted}>No agents joined yet.</text>
             ) : (
-              peers.map((p) => (
-                <box key={p.agent_id} flexDirection="column">
-                  <text>
-                    <span fg={p.online ? colors.good : colors.dim}>
-                      {p.online ? "● " : "○ "}
-                    </span>
-                    <span fg={p.online ? colors.fg : colors.muted}>
-                      {p.display_name}
-                    </span>
-                  </text>
-                  <text fg={colors.dim}>
-                    {"    "}
-                    {p.agent_id} · {p.role}
-                    {p.harness !== "unknown" ? ` · ${p.harness}` : ""}
-                  </text>
-                </box>
-              ))
+              peers.map((p) => {
+                const isNew =
+                  initialPeersRef.current !== null &&
+                  !initialPeersRef.current.has(p.agent_id);
+                const row = (
+                  <>
+                    <text>
+                      <span fg={p.online ? colors.good : colors.dim}>
+                        {p.online ? "● " : "○ "}
+                      </span>
+                      <span fg={p.online ? colors.fg : colors.muted}>
+                        {p.display_name}
+                      </span>
+                    </text>
+                    <text fg={colors.dim}>
+                      {"    "}
+                      {p.agent_id} · {p.role}
+                      {p.harness !== "unknown" ? ` · ${p.harness}` : ""}
+                    </text>
+                  </>
+                );
+                return isNew ? (
+                  <FadeIn key={p.agent_id} flexDirection="column" duration={220}>
+                    {row}
+                  </FadeIn>
+                ) : (
+                  <box key={p.agent_id} flexDirection="column">
+                    {row}
+                  </box>
+                );
+              })
             )}
           </box>
         </box>
