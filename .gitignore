@@ -9,3 +9,5 @@ coverage
 .idea
 .vscode
 *.tgz
+.devin/
+skills-lock.json

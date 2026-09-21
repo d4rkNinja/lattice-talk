@@ -1,6 +1,6 @@
 import Redis from "ioredis";
 import type { LatticeConfig } from "./config.js";
-import { keys } from "./keys.js";
+import { keys, sessionTag } from "./keys.js";
 import { log, redactUrl } from "../log.js";
 import { exclusiveStart } from "./stream.js";
 import type { Store } from "./store.js";
@@ -65,6 +65,7 @@ if redis.call('HSETNX', KEYS[1], 'session_id', ARGV[1]) == 1 then
   if ARGV[6] ~= '' then
     redis.call('HSET', KEYS[1], 'join_token_hash', ARGV[6])
   end
+  redis.call('SADD', KEYS[2], ARGV[1])
   return 1
 end
 return 0
@@ -152,8 +153,9 @@ export class RedisStore implements Store {
   async initSessionMeta(sessionId: string, meta: SessionMeta): Promise<boolean> {
     const created = await this.redis.eval(
       INIT_SESSION_META_LUA,
-      1,
+      2,
       keys.sessionMeta(this.ns, sessionId),
+      keys.sessionsIndex(this.ns),
       meta.session_id,
       meta.namespace,
       meta.created_at,
@@ -257,9 +259,33 @@ export class RedisStore implements Store {
     return added === 1;
   }
 
+  async listSessions(): Promise<string[]> {
+    const ids = await this.redis.smembers(keys.sessionsIndex(this.ns));
+    return ids.sort();
+  }
+
   async listRooms(sessionId: string): Promise<string[]> {
     const rooms = await this.redis.smembers(keys.sessionRooms(this.ns, sessionId));
     return rooms.sort();
+  }
+
+  async deleteRoom(sessionId: string, roomId: string): Promise<void> {
+    const pipeline = this.redis.pipeline();
+    pipeline.srem(keys.sessionRooms(this.ns, sessionId), roomId);
+    pipeline.del(keys.roomMeta(this.ns, sessionId, roomId));
+    pipeline.del(keys.roomMembers(this.ns, sessionId, roomId));
+    pipeline.del(keys.roomStream(this.ns, sessionId, roomId));
+    // Drop every per-agent read cursor for this room. Cursor keys look like
+    // lattice:{ns}:cursor:{sid}:{agent}:{rid} — match the rid exactly so a
+    // room named "b" doesn't wipe DM cursors like "dm:a:b" or "inbox:b".
+    const cursorPrefix = `lattice:${this.ns}:cursor:${sessionTag(sessionId)}:`;
+    for await (const batch of this.redis.scanStream({ match: `${cursorPrefix}*`, count: 200 })) {
+      for (const key of batch as string[]) {
+        const rid = key.slice(cursorPrefix.length).split(":").slice(1).join(":");
+        if (rid === roomId) pipeline.del(key);
+      }
+    }
+    await pipeline.exec();
   }
 
   async getRoomMeta(sessionId: string, roomId: string): Promise<RoomMeta | null> {

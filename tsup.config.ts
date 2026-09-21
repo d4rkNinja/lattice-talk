@@ -2,7 +2,10 @@ import { chmodSync, existsSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: {
+    index: "src/index.ts",
+    "tui/main": "src/tui/main.tsx",
+  },
   format: ["esm"],
   platform: "node",
   target: "node20",
@@ -13,9 +16,11 @@ export default defineConfig({
   splitting: false,
   bundle: true,
   minify: false,
-  // Bundle application code and npm deps so `node dist/index.js` runs
-  // without installing node_modules in a clone.
-  noExternal: [/.*/],
+  // Bundle the serve-time deps so `node dist/index.js serve` runs without
+  // node_modules in a clone. The OpenTUI/React stack stays external: it is
+  // loaded only by the TUI child process and resolved from node_modules.
+  noExternal: [/^@modelcontextprotocol\//, /^@opentelemetry\//, "ioredis", "zod"],
+  external: [/^@opentui\//, "react", "react-dom", "react-reconciler", "scheduler"],
   // ESM output has no `require`; CJS deps (ioredis, parts of OTEL) call
   // require("events") etc. createRequire must exist before esbuild's __require helper.
   shims: true,
@@ -24,6 +29,8 @@ export default defineConfig({
   },
   esbuildOptions(options) {
     options.legalComments = "none";
+    options.jsx = "automatic";
+    options.jsxImportSource = "@opentui/react";
   },
   async onSuccess() {
     if (process.platform !== "win32" && existsSync("dist/index.js")) {

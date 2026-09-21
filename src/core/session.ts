@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { safeEqual, sha256Hex } from "./crypto.js";
 import { UserError } from "./errors.js";
-import { assertBoundedText, optionalId } from "./ids.js";
+import { assertBoundedText, assertId, optionalId } from "./ids.js";
 import {
   DEFAULT_ROOM,
   DISPLAY_NAME_MAX_CHARS,
@@ -18,8 +18,8 @@ import {
   resolveInspectSessionIdAuthorized,
   resolveSessionId,
 } from "./resolve.js";
-import { ensureMainRoom } from "./rooms.js";
-import type { AgentRecord, BusDeps, PeerInfo, SessionMeta } from "./types.js";
+import { ensureMainRoom, ensureRoom } from "./rooms.js";
+import type { AgentRecord, BusDeps, JoinPolicy, PeerInfo, SessionMeta } from "./types.js";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -57,6 +57,44 @@ function assertJoinPolicy(meta: SessionMeta | null, deps: BusDeps): void {
       "auth",
     );
   }
+}
+
+/**
+ * Create the session atomically if absent (join policy fixed by this
+ * process's LATTICE_JOIN_TOKEN), verify read access if it already exists,
+ * and ensure the default `main` room. Used by the TUI/CLI, which observes
+ * sessions without joining as an agent.
+ */
+export async function ensureWorkspaceSession(
+  deps: BusDeps,
+  sessionId: string,
+): Promise<{ session_id: string; created: boolean; join_policy: JoinPolicy }> {
+  const sid = assertId(sessionId, "session_id");
+  let meta = await deps.store.getSessionMeta(sid);
+  assertJoinPolicy(meta, deps);
+  let created = false;
+  if (!meta) {
+    const hash = tokenHash(deps);
+    const fresh: SessionMeta = {
+      session_id: sid,
+      namespace: deps.config.namespace,
+      created_at: nowIso(),
+      created_by: "lattice",
+      join_policy: hash ? "token" : "open",
+      ...(hash ? { join_token_hash: hash } : {}),
+    };
+    created = await deps.store.initSessionMeta(sid, fresh);
+    meta = (await deps.store.getSessionMeta(sid)) ?? fresh;
+    if (!created) {
+      assertJoinPolicy(meta, deps);
+    }
+  }
+  await ensureRoom(deps, sid, DEFAULT_ROOM, "lattice", DEFAULT_ROOM);
+  return {
+    session_id: sid,
+    created,
+    join_policy: meta.join_policy,
+  };
 }
 
 export async function joinSession(

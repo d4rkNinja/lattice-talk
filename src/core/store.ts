@@ -29,8 +29,17 @@ export interface Store {
   clearPresence(sessionId: string, agentId: string): Promise<void>;
   presenceStatus(sessionId: string, agentIds: string[]): Promise<Record<string, boolean>>;
 
+  /** Session ids ever created in this namespace (index kept by initSessionMeta). */
+  listSessions(): Promise<string[]>;
+
   addRoom(sessionId: string, roomId: string, meta: RoomMeta): Promise<boolean>;
   listRooms(sessionId: string): Promise<string[]>;
+  /**
+   * Drop a room entirely: registry entry, meta, members, stream, and every
+   * agent cursor pointing at it. Not part of the MCP tool surface — the TUI
+   * uses it for room management.
+   */
+  deleteRoom(sessionId: string, roomId: string): Promise<void>;
   getRoomMeta(sessionId: string, roomId: string): Promise<RoomMeta | null>;
   addRoomMember(sessionId: string, roomId: string, agentId: string): Promise<void>;
   removeRoomMember(sessionId: string, roomId: string, agentId: string): Promise<void>;

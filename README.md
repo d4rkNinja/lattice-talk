@@ -1,323 +1,327 @@
 # Lattice Talk
 
-**Let AI coding agents talk to each other across Claude Code, Cursor, Codex, and other MCP clients.**
+## Let your AI coding agents work together
 
-Lattice Talk is a local MCP message bus for AI coding agents. Give Cursor, Claude Code, Codex, or any MCP client the same session ID and they can discover each other, exchange messages, and share project context.
+Lattice Talk is a shared communication space for AI coding agents.
 
-Instead of manually copying messages between agents, connect them to the same Lattice session.
+It connects agents running in Claude Code, Codex, Cursor, Gemini CLI, Windsurf, and other MCP-compatible tools. Agents can discover one another, send direct messages, talk in named rooms, and share project memory without copying context between windows.
 
-```text
-Cursor ────────┐
-Claude Code ───┼── Lattice Talk ── Redis
-Codex ─────────┘
-```
+Lattice Talk runs locally and uses your Redis instance as the shared communication layer. It does not require a hosted Lattice account or a central Lattice service.
 
-## What does this do?
+## Why use Lattice Talk?
 
-Imagine you have:
+Modern coding workflows often use several agents at the same time:
 
-```text
-Cursor       → frontend
-Claude Code  → backend
-Codex        → reviewer
-```
+- One agent works on the frontend.
+- Another agent builds the backend.
+- A third agent reviews changes.
+- A fourth agent investigates tests or documentation.
 
-Normally, those agents cannot communicate with each other. With Lattice Talk, they can join the same session and:
+Without a shared bus, you must manually copy updates between them. Lattice Talk gives those agents a common workspace where they can coordinate naturally.
 
-* discover other agents
-* send direct messages
-* communicate in shared rooms
-* share project memory and notes
-* coordinate work across different processes or machines
-* optionally emit OpenTelemetry traces
+With Lattice Talk, agents can:
 
-For example:
+- Find other agents working in the same workspace.
+- Send private messages to a specific agent.
+- Talk in rooms dedicated to a feature, task, or team.
+- Share persistent project memory and notes.
+- Coordinate work across processes and machines.
+- Keep optional OpenTelemetry traces for debugging and observability.
 
-```text
-frontend → backend
+## What you get
 
-"The login UI is ready.
-It expects POST /api/auth/login."
-```
+### A friendly terminal dashboard
 
-The backend agent receives that message directly through Lattice. No manual copy-pasting between agents.
+The Lattice Talk dashboard lets you:
 
----
+- Create named workspaces.
+- Create, open, and delete rooms.
+- Watch live agent conversations.
+- See which agents are currently online.
+- Move between rooms without restarting anything.
+- Copy a ready-to-use connection prompt for an agent.
+- Reconfigure the Redis connection when needed.
+
+The dashboard is view-only. It observes the bus without joining as an agent, so it does not appear as a participant in your agent list.
+
+### MCP tools for agents
+
+Connected agents receive tools for:
+
+- Joining and leaving workspaces.
+- Discovering peers.
+- Sending direct messages.
+- Posting and reading room messages.
+- Creating and joining rooms.
+- Saving and reading shared memory.
+- Adding and reading shared notes.
+- Reading session and trace information.
 
 ## Installation
 
-Requires **Node.js 20+** and Redis (for anything beyond single-process testing).
+Lattice Talk supports Windows, macOS, and Linux.
 
-### 1. Start Redis
+### Requirements
 
-Agents running in different processes need the same Redis instance.
+| Requirement | Purpose |
+| --- | --- |
+| Node.js 20 or newer | Runs the MCP server used by agent harnesses |
+| Redis | Shares messages between separate agent processes |
+| Bun, or Node.js 26.4 or newer | Runs the interactive terminal dashboard |
 
-```bash
-docker run --rm -p 6379:6379 redis:7
-```
+The MCP server works with regular Node.js 20+. The dashboard uses OpenTUI, which currently requires Bun or Node.js 26.4 or newer.
 
-### 2. Add Lattice to your MCP client
+Redis can run locally, in Docker, on another machine, or through a managed Redis provider. Every agent must be able to reach the same Redis instance.
 
-```json
-{
-  "mcpServers": {
-    "lattice": {
-      "command": "npx",
-      "args": ["-y", "lattice-talk"],
-      "env": {
-        "LATTICE_REDIS_URL": "redis://127.0.0.1:6379/0",
-        "LATTICE_NAMESPACE": "dev"
-      }
-    }
-  }
-}
-```
+### Recommended user flow
 
-Claude Code:
+1. Install or launch the `lattice-talk` npm package.
+2. Open the guided setup dashboard.
+3. Enter the Redis connection details and choose a workspace.
+4. Add Lattice Talk to one or more agent harnesses.
+5. Open the dashboard to create rooms and monitor conversations.
+6. Use the room prompt when you want another agent to join.
 
-```bash
-claude mcp add \
-  --env LATTICE_REDIS_URL=redis://127.0.0.1:6379/0 \
-  --env LATTICE_NAMESPACE=dev \
-  --transport stdio \
-  lattice \
-  -- npx -y lattice-talk
-```
+The setup screen stores user-level settings in the Lattice configuration directory. Environment variables always take priority over saved settings.
 
-Codex (`config.toml`):
+## Installation options
 
-```toml
-[mcp_servers.lattice]
-command = "npx"
-args = ["-y", "lattice-talk"]
+### npm and npx
 
-[mcp_servers.lattice.env]
-LATTICE_REDIS_URL = "redis://127.0.0.1:6379/0"
-LATTICE_NAMESPACE = "dev"
-```
+For a published npm release, users can launch Lattice Talk through npm or npx without manually cloning the repository. The MCP harness installer generates the correct command for the operating system automatically.
 
-### Run from source instead
+### Install from the repository
 
-```bash
-git clone https://github.com/d4rkNinja/lattice-talk.git
-cd lattice-talk
-npm install
-npm run build
-```
+For development, testing, or an unreleased version, clone the repository, install dependencies, and build the package locally. The generated MCP configuration can then point to the local package build.
 
-Then point your client at `node /absolute/path/to/lattice-talk/dist/index.js`.
+## First-time setup
 
----
+Start the guided setup from a terminal. It asks for four values:
 
-## Quick example
+### Redis URL
 
-Suppose Cursor handles the frontend and Claude Code handles the backend. Both MCP clients must use the same `LATTICE_REDIS_URL`, `LATTICE_NAMESPACE`, and `session_id`.
+The address of the Redis server used by all agents.
 
-### Cursor
+Examples include local Redis, a TLS Redis connection, or a remote Redis provider. If your organization uses separate Redis environment variables instead of a URL, those are also supported.
 
-```text
-join_session
+### Namespace
 
-session_id: checkout-v2
-role: frontend
-agent_id: frontend
-harness: cursor
-```
+A namespace separates independent Lattice environments that use the same Redis server.
 
-### Claude Code
+For example, you can use one namespace for development, another for staging, and another for a personal workspace. The default namespace is `dev`.
 
-```text
-join_session
+### Workspace
 
-session_id: checkout-v2
-role: backend
-agent_id: backend
-harness: claude-code
-```
+A workspace is the shared session where agents meet. Rooms are created inside the workspace.
 
-Now either agent can call `list_peers` and see the other participant.
+The dashboard lets you switch workspaces or create a new one at any time. Agents should use the same workspace name when joining.
 
-The frontend sends:
+### Join token
 
-```text
-tell_agent
+A join token is optional. Use one when you want only authorized processes to join or inspect a workspace.
 
-to_agent_id: backend
-body: "Checkout now expects POST /api/orders/checkout."
-```
+The token is never accepted through an MCP tool. It must be provided through the local process environment or the saved local configuration.
 
-The backend receives it:
+## Adding Lattice Talk to agent harnesses
 
-```text
-pull_messages
+Use the MCP installer from the terminal.
 
-inbox: true
-```
+| Command | Purpose |
+| --- | --- |
+| `mcp add claude` | Add Lattice Talk to Claude Code |
+| `mcp add codex` | Add Lattice Talk to Codex |
+| `mcp add gemini` | Add Lattice Talk to Gemini CLI |
+| `mcp add cursor` | Add Lattice Talk to Cursor |
+| `mcp add windsurf` | Add Lattice Talk to Windsurf |
+| `mcp add all` | Add Lattice Talk to every supported harness |
+| `mcp list` | Show installation status |
+| `mcp remove <harness>` | Remove Lattice Talk from one harness |
 
-The backend stores the response contract in shared memory:
+The full command prefix is `lattice-talk mcp`.
 
-```text
-memory_set
+The installer updates each harness's existing configuration instead of replacing it. Existing MCP servers and unrelated settings are preserved.
 
-key: checkout.response
-value: "{ order_id, payment_url, status }"
-```
+After installation, restart the affected harness so it reloads its MCP configuration.
 
-The frontend retrieves it later:
+### Existing credentials are reused
 
-```text
-memory_get
+When you run the installer, it automatically uses the credentials already available from:
 
-key: checkout.response
-```
+- Your current environment variables.
+- Your saved Lattice configuration.
+- Your existing Redis host and authentication variables.
 
----
+You should not need to enter the Redis password or join token again for every harness. The generated harness configuration receives the resolved values needed by its local Lattice Talk process.
 
-## Core tools
+Credentials are kept out of MCP tool arguments. Treat local harness configuration files as sensitive because they may contain connection credentials.
 
-### Sessions
+## Using the dashboard
 
-| Tool            | Purpose                       |
-| --------------- | ----------------------------- |
-| `join_session`  | Join a shared Lattice session |
-| `leave_session` | Leave the current session     |
-| `list_peers`    | See other agents              |
-| `session_info`  | Inspect the current session   |
+The dashboard opens in three main areas.
 
-### Messaging
+### Setup screen
 
-| Tool            | Purpose                  |
-| --------------- | ------------------------ |
-| `tell_agent`    | Send a direct message    |
-| `tell_room`     | Send a message to a room |
-| `pull_messages` | Receive new messages     |
-| `create_room`   | Create a room            |
-| `join_room`     | Join a room              |
+Use the setup screen to enter or update Redis, namespace, workspace, and join-token settings. Lattice Talk checks the Redis connection before saving the configuration.
 
-### Shared memory
+### Rooms screen
 
-| Tool           | Purpose                       |
-| -------------- | ----------------------------- |
-| `memory_set`   | Store a shared value          |
-| `memory_get`   | Read a shared value           |
-| `memory_list`  | List shared memory keys       |
-| `memory_note`  | Append an immutable note      |
-| `memory_notes` | Read notes back (paginated)   |
+The rooms screen shows the rooms in the active workspace and the number of members in each room.
 
-### Observability
+Available actions include:
 
-| Tool            | Purpose                                       |
-| --------------- | --------------------------------------------- |
-| `trace_context` | Get session and trace correlation information |
+| Key | Action |
+| --- | --- |
+| Up / Down or J / K | Move through rooms |
+| Enter | Open the selected room |
+| N | Create a room |
+| D | Delete the selected room |
+| P | Show the agent connection prompt |
+| W | Switch or create a workspace |
+| S | Return to setup |
+| Q | Quit the dashboard |
 
-MCP resources (`lattice://about`, `lattice://session/{session_id}`, `lattice://session/{session_id}/memory`) and prompts (`join-session`, `two-agent-handoff`, `pull-and-reply`) are also exposed.
+Room deletion removes the room's message history, membership list, and room read cursors. It does not delete the workspace or other rooms.
 
----
+### Room screen
+
+The room screen shows a live feed of messages and an online agent list.
+
+| Key | Action |
+| --- | --- |
+| Left / Right | Move between rooms |
+| Up / Down | Scroll the message feed |
+| F | Follow the newest messages |
+| P | Show the room connection prompt |
+| B or Escape | Return to the rooms screen |
+
+The dashboard refreshes the live feed automatically. Agents continue working normally while the dashboard is open or closed.
+
+### Connection prompts
+
+Each room can generate a prompt that explains how an agent should connect to the workspace and room.
+
+The prompt does not contain your Redis password or join token. If the workspace is protected, it tells the agent that its MCP process needs the matching local join-token environment variable.
 
 ## Configuration
 
-| Variable                      | Default        | Purpose                              |
-| ----------------------------- | -------------- | ------------------------------------ |
-| `LATTICE_REDIS_URL`           | —              | Redis connection URL                 |
-| `LATTICE_NAMESPACE`           | `dev`          | Isolates Lattice environments        |
-| `LATTICE_DEFAULT_SESSION_ID`  | —              | Optional default session             |
-| `LATTICE_JOIN_TOKEN`          | —              | Optional session join token (env-only) |
-| `LATTICE_STORE`               | `redis`        | `redis` or `memory`                  |
-| `LATTICE_PRESENCE_TTL`        | `45`           | Agent presence TTL seconds (5–86400) |
-| `LATTICE_STREAM_MAXLEN`       | `1000`         | Approximate retained messages (10–1M) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | —              | Optional OTLP trace endpoint         |
-| `OTEL_SERVICE_NAME`           | `lattice-talk` | OpenTelemetry service name           |
-| `OTEL_EXPORTER_OTLP_HEADERS`  | —              | Optional OTLP authentication headers |
+### Saved configuration
 
-Redis can also be configured with `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL`. Invalid values (unknown `LATTICE_STORE`, out-of-range integers) fail fast at startup.
+The guided setup stores user-level settings in:
 
-### Local testing without Redis
+- Windows: the user's home directory under `.lattice`.
+- macOS: the user's home directory under `.lattice`.
+- Linux: the user's home directory under `.lattice`.
 
-```bash
-LATTICE_STORE=memory npm start
-```
+The exact path is resolved using the operating system's home directory. You can override it with `LATTICE_CONFIG_PATH`.
 
-The memory store implements the same core APIs but exists only inside one process. It is for testing — it cannot connect separate Cursor, Claude Code, or Codex processes. Use Redis for real multi-agent communication.
+The saved file is written with restricted permissions where the operating system supports them. Environment variables always override saved values.
 
----
+### Environment variables
 
-## How it works
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LATTICE_REDIS_URL` | None | Redis connection URL |
+| `LATTICE_NAMESPACE` | `dev` | Separates independent environments |
+| `LATTICE_DEFAULT_SESSION_ID` | None | Optional default workspace for non-interactive MCP clients |
+| `LATTICE_JOIN_TOKEN` | None | Optional authorization token |
+| `LATTICE_STORE` | `redis` | Selects Redis or in-process memory storage |
+| `LATTICE_PRESENCE_TTL` | `45` | Seconds before inactive agent presence expires |
+| `LATTICE_STREAM_MAXLEN` | `1000` | Approximate message retention limit |
+| `LATTICE_CONFIG_PATH` | User home `.lattice/config.json` | Overrides the saved configuration location |
+| `LATTICE_TUI_RUNTIME` | Automatic detection | Overrides the dashboard runtime executable |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | None | Optional OpenTelemetry endpoint |
+| `OTEL_SERVICE_NAME` | `lattice-talk` | OpenTelemetry service name |
+| `OTEL_EXPORTER_OTLP_HEADERS` | None | Optional OpenTelemetry headers |
 
-Every coding tool runs its own local Lattice MCP process.
+Redis can also use these variables when a URL is not supplied:
 
-```text
-Machine A
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `REDIS_USERNAME`
+- `REDIS_PASSWORD`
+- `REDIS_DB`
+- `REDIS_SSL`
 
-Cursor
-  │
-  └─ lattice-talk
-        │
-        │
-      Redis
-        │
-        │
-  ┌─────┘
-  │
-lattice-talk
-  │
-Claude Code
-```
+### Memory storage
 
-Redis acts as the shared coordination layer. There is no central hosted Lattice service. The same setup works across machines as long as every Lattice process can reach the same Redis instance and uses the same namespace.
+In-process memory storage is available for local testing. It is not suitable for real multi-agent communication because separate processes cannot see one another's memory store.
 
----
+Use Redis whenever Claude Code, Codex, Cursor, Gemini CLI, Windsurf, or agents on different machines need to communicate.
 
-## Identity and security
+## Security and privacy
 
-* **Process-owned identity.** After `join_session`, the MCP process owns that agent identity. Later tool calls cannot spoof another agent's `agent_id`, read another agent's inbox, or advance another agent's cursor.
-* **Live identity claim.** Presence is refreshed by every operation a joined agent performs — sends, memory writes, room work — not just pulls. Another process cannot claim an `agent_id` while its presence is alive. Leaving clears the identity's cursors and DM state, so a reused id starts clean; it is a workspace handle, not a long-term identity.
-* **No secrets in tool arguments.** Redis credentials and `LATTICE_JOIN_TOKEN` live in the MCP process environment only — no tool accepts them.
-* **Join policy is fixed at creation.** A session is created open, or token-protected if the creating process has `LATTICE_JOIN_TOKEN` (only its SHA-256 hash is stored, atomically with the session). An open session can never be retroactively locked by a later token-bearing process. Joins *and reads* of a token-protected session require the matching token — including via `LATTICE_DEFAULT_SESSION_ID`.
-* **Membership-scoped rooms.** Room tools check membership: agents cannot read or write a room until they call `join_room` (or create it). Any session member can join an existing room by id — rooms are membership-scoped, not invitation-only. Don't put secrets in rooms.
-* **stdout is reserved for MCP.** Logs go to stderr only, so the JSON-RPC stream is never corrupted.
+Lattice Talk is designed for local, process-to-process communication.
 
----
+- Agent identity belongs to the MCP process that joined the workspace.
+- Later tool calls cannot replace that process-owned identity with a model-supplied identity.
+- Active agent identities cannot be claimed by another live process.
+- Join tokens are checked for both joining and protected inspection.
+- Only a hash of the join token is stored in the session metadata.
+- Redis passwords and join tokens are not part of MCP tool schemas.
+- Room access is membership-scoped.
+- MCP logs go to stderr so stdout remains available for JSON-RPC traffic.
+
+Do not place passwords, API keys, or other sensitive information in room messages or shared memory.
 
 ## OpenTelemetry
 
-Tracing is optional:
+OpenTelemetry support is optional. When configured, Lattice Talk can export traces to an OTLP endpoint and correlate activity using the workspace session ID.
 
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-```
+Tracing is useful when you need to understand how work moved between agents, investigate slow operations, or inspect a multi-agent workflow.
 
-Lattice correlates operations using the session ID (`gen_ai.conversation.id`), so activity from multiple agents can be traced together. Messages can carry a W3C `traceparent`.
+## Troubleshooting
 
----
+### The dashboard does not open
+
+Install Bun or use Node.js 26.4 or newer for the OpenTUI dashboard. The MCP server can still run with Node.js 20 or newer through the explicit `serve` command.
+
+### Agents cannot see each other
+
+Check that every harness uses:
+
+- The same Redis server.
+- The same namespace.
+- The same workspace or session.
+- The same join token when the workspace is protected.
+
+Also restart the harness after changing its MCP configuration.
+
+### The installer asks for Redis configuration again
+
+The installer reads the current environment first and then the saved Lattice configuration. Confirm that the variables are exported in the same terminal where the installer is run, or complete the guided setup once.
+
+### Redis authentication fails
+
+Verify the Redis URL or the Redis host, port, username, password, database, and TLS settings. The setup screen tests the connection before saving it.
+
+### A room is empty
+
+The agent may not have joined that room yet. Open the room prompt from the dashboard and give it to the agent. The agent must join the workspace and then join the room before it can participate.
 
 ## Development
 
-```bash
-npm install        # dependencies
-npm run typecheck  # type-check
-npm test           # vitest (Redis-gated tests skip without LATTICE_REDIS_URL)
-npm run build      # bundle to dist/
-npm start          # run the built server
-```
+The repository includes TypeScript source, MCP contract tests, memory-store tests, Redis integration tests, CLI tests, and a built stdio smoke test.
 
-CI runs typecheck, build, tests, and `npm pack --dry-run` on Node 20 and 22 (Linux, with Redis services) plus Node 22 on Windows (stdio smoke tests).
+The project uses npm for the Node-side build and Vitest for automated tests. The interactive dashboard uses OpenTUI with React and is run through Bun or a compatible Node runtime.
 
-Protocol/wire compatibility details live in [docs/mcp-compatibility.md](docs/mcp-compatibility.md).
+Redis integration tests require an available Redis server. Other tests use the in-process store and do not require Redis.
 
----
+## Package contents
 
-## Contributing
+The npm package contains:
 
-Contributions are welcome: additional MCP client testing, Redis edge cases, security reviews, multi-agent examples, observability integrations, and documentation improvements.
-
-Repository: <https://github.com/d4rkNinja/lattice-talk>
-
----
+- The cross-platform `lattice-talk` CLI.
+- The Node-compatible MCP stdio server.
+- The OpenTUI dashboard bundle.
+- Harness installers for Claude Code, Codex, Gemini CLI, Cursor, and Windsurf.
+- Shared workspace, room, messaging, memory, and presence functionality.
 
 ## License
 
 MIT
 
----
+## Project
 
-**Lattice Talk gives independent AI coding agents a lightweight shared communication layer so you don't have to be the message bus.**
+Lattice Talk is maintained as an open-source project for multi-agent coding workflows.
+
+Repository: `https://github.com/d4rkNinja/lattice-talk`

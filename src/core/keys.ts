@@ -17,6 +17,9 @@ export function inboxCursorRid(otherAgentId: string): string {
 }
 
 export const keys = {
+  sessionsIndex(ns: string): string {
+    return `lattice:${ns}:sessions`;
+  },
   sessionMeta(ns: string, sid: string): string {
     return `lattice:${ns}:session:${sessionTag(sid)}:meta`;
   },

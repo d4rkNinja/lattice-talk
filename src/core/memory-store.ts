@@ -1,4 +1,4 @@
-import { keys } from "./keys.js";
+import { keys, sessionTag } from "./keys.js";
 import { isAfterCursor } from "./stream.js";
 import type { Store } from "./store.js";
 import type { AgentRecord, RoomMeta, SessionMeta, StreamEntry } from "./types.js";
@@ -90,6 +90,7 @@ export class MemoryStore implements Store {
     const key = keys.sessionMeta(this.ns, sessionId);
     const existing = this.hashes.get(key);
     if (existing && existing.size > 0) return false;
+    this.set(keys.sessionsIndex(this.ns)).add(sessionId);
     const h = this.hash(key);
     h.set("session_id", meta.session_id);
     h.set("namespace", meta.namespace);
@@ -190,8 +191,27 @@ export class MemoryStore implements Store {
     return created;
   }
 
+  async listSessions(): Promise<string[]> {
+    return [...(this.sets.get(keys.sessionsIndex(this.ns)) ?? [])].sort();
+  }
+
   async listRooms(sessionId: string): Promise<string[]> {
     return [...(this.sets.get(keys.sessionRooms(this.ns, sessionId)) ?? [])].sort();
+  }
+
+  async deleteRoom(sessionId: string, roomId: string): Promise<void> {
+    this.sets.get(keys.sessionRooms(this.ns, sessionId))?.delete(roomId);
+    this.hashes.delete(keys.roomMeta(this.ns, sessionId, roomId));
+    this.sets.delete(keys.roomMembers(this.ns, sessionId, roomId));
+    this.streams.delete(keys.roomStream(this.ns, sessionId, roomId));
+    const cursorPrefix = `lattice:${this.ns}:cursor:${sessionTag(sessionId)}:`;
+    for (const key of [...this.strings.keys()]) {
+      // Cursor keys look like {prefix}{agent}:{rid} — match the rid exactly so
+      // a room named "b" doesn't wipe DM cursors like "dm:a:b" or "inbox:b".
+      if (!key.startsWith(cursorPrefix)) continue;
+      const rid = key.slice(cursorPrefix.length).split(":").slice(1).join(":");
+      if (rid === roomId) this.strings.delete(key);
+    }
   }
 
   async getRoomMeta(sessionId: string, roomId: string): Promise<RoomMeta | null> {

@@ -38,9 +38,9 @@ export function createMcpServer(deps: BusDeps): McpServer {
   return server;
 }
 
-export async function startServer(): Promise<void> {
+export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   installOtelStderrLogger();
-  const config = loadConfig();
+  const config = loadConfig(env);
   const otel = setupOtel(config);
   let store: Store;
   try {
