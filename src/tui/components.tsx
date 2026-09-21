@@ -1,6 +1,79 @@
-import { useKeyboard, useRenderer } from "@opentui/react";
-import { useState } from "react";
+import { useKeyboard, useRenderer, useTimeline } from "@opentui/react";
+import type { BoxRenderable, TextRenderable } from "@opentui/core";
+import { useEffect, useRef, useState } from "react";
 import { colors } from "./theme.js";
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** Braille spinner for async states — pure text, no renderer animation needed. */
+export function Spinner({ label }: { label?: string }) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <text>
+      <span fg={colors.accent}>{SPINNER_FRAMES[frame]}</span>
+      {label ? <span fg={colors.muted}> {label}</span> : null}
+    </text>
+  );
+}
+
+/** Fades in (and optionally slides up) once on mount. */
+export function FadeIn({
+  children,
+  slide = 0,
+  duration = 160,
+  ...rest
+}: {
+  children?: React.ReactNode;
+  slide?: number;
+  duration?: number;
+  [key: string]: unknown;
+}) {
+  const ref = useRef<BoxRenderable | null>(null);
+  const timeline = useTimeline();
+  const played = useRef(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || played.current) return;
+    played.current = true;
+    if (slide) node.translateY = slide;
+    timeline.add(node, { opacity: 1, duration, ease: "outQuad" });
+    if (slide) timeline.add(node, { translateY: 0, duration, ease: "outQuad" });
+  }, [timeline, slide, duration]);
+  return (
+    <box ref={ref} opacity={0} {...rest}>
+      {children}
+    </box>
+  );
+}
+
+/** Pulsing accent dot — a subtle "live" indicator. */
+export function LiveDot({ label = "live" }: { label?: string }) {
+  const ref = useRef<TextRenderable | null>(null);
+  const timeline = useTimeline({ loop: true });
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    timeline.add(node, {
+      opacity: 0.35,
+      duration: 900,
+      ease: "inOutSine",
+      loop: true,
+      alternate: true,
+    });
+  }, [timeline]);
+  return (
+    <box flexDirection="row">
+      <text ref={ref} fg={colors.good}>
+        ●
+      </text>
+      <text fg={colors.muted}> {label}</text>
+    </box>
+  );
+}
 
 export function Key({ k, label }: { k: string; label: string }) {
   return (
@@ -11,7 +84,7 @@ export function Key({ k, label }: { k: string; label: string }) {
   );
 }
 
-export function Header({ left, right }: { left: string; right?: string }) {
+export function Header({ left, right }: { left: string; right?: React.ReactNode }) {
   return (
     <box
       flexDirection="row"
@@ -26,7 +99,7 @@ export function Header({ left, right }: { left: string; right?: string }) {
         </span>
         <span fg={colors.muted}>  {left}</span>
       </text>
-      {right ? <text fg={colors.muted}>{right}</text> : null}
+      {typeof right === "string" ? <text fg={colors.muted}>{right}</text> : (right ?? null)}
     </box>
   );
 }
@@ -55,6 +128,15 @@ export function Modal({
   width?: number;
   children: React.ReactNode;
 }) {
+  const panelRef = useRef<BoxRenderable | null>(null);
+  const timeline = useTimeline();
+  useEffect(() => {
+    const node = panelRef.current;
+    if (!node) return;
+    node.translateY = 1;
+    timeline.add(node, { opacity: 1, duration: 130, ease: "outQuad" });
+    timeline.add(node, { translateY: 0, duration: 130, ease: "outQuad" });
+  }, [timeline]);
   return (
     <box
       position="absolute"
@@ -67,6 +149,8 @@ export function Modal({
       backgroundColor="#000000a0"
     >
       <box
+        ref={panelRef}
+        opacity={0}
         border
         borderStyle="rounded"
         borderColor={colors.borderActive}

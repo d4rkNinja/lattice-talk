@@ -17,7 +17,7 @@ import {
   type PeerView,
   type RoomInfo,
 } from "../bus.js";
-import { Footer, Header, Key, PromptModal } from "../components.js";
+import { FadeIn, Footer, Header, Key, LiveDot, PromptModal } from "../components.js";
 import { colors, kindColor } from "../theme.js";
 
 function wrap(body: string, width: number): string[] {
@@ -36,12 +36,20 @@ function wrap(body: string, width: number): string[] {
   return lines.length ? lines : [""];
 }
 
-function MessageLine({ m, width }: { m: LatticeMessage; width: number }) {
+function MessageLine({
+  m,
+  width,
+  animate,
+}: {
+  m: LatticeMessage;
+  width: number;
+  animate: boolean;
+}) {
   const head = ` ${formatTime(m.ts)}  ${m.from}`;
   const tag = ` · ${m.role}${m.harness && m.harness !== "unknown" ? `/${m.harness}` : ""}${m.kind !== "chat" ? ` · ${m.kind}` : ""}`;
   const bodyWidth = Math.max(20, width - 4);
-  return (
-    <box flexDirection="column" paddingX={1}>
+  const inner = (
+    <>
       <text>
         <span fg={colors.dim}>{head}</span>
         <span fg={colors.dim}>{tag}</span>
@@ -53,6 +61,16 @@ function MessageLine({ m, width }: { m: LatticeMessage; width: number }) {
           {line}
         </text>
       ))}
+    </>
+  );
+  // Only messages arriving after the initial load animate — history renders flat.
+  return animate ? (
+    <FadeIn flexDirection="column" paddingX={1} duration={180}>
+      {inner}
+    </FadeIn>
+  ) : (
+    <box flexDirection="column" paddingX={1}>
+      {inner}
     </box>
   );
 }
@@ -77,10 +95,13 @@ export function RoomScreen({
   const [peers, setPeers] = useState<PeerView[]>([]);
   const [promptOpen, setPromptOpen] = useState(false);
   const lastIdRef = useRef("0");
+  // Ids in the first loaded page render flat; anything after animates in.
+  const initialIdsRef = useRef<Set<string> | null>(null);
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
 
   const refresh = useCallback(async () => {
     try {
+      const firstLoad = lastIdRef.current === "0";
       const [page, r, p] = await Promise.all([
         pollRoomMessages(bus, workspace, roomId, lastIdRef.current),
         listRoomsInfo(bus, workspace),
@@ -88,7 +109,10 @@ export function RoomScreen({
       ]);
       if (page.messages.length) {
         lastIdRef.current = page.lastId;
+        if (firstLoad) initialIdsRef.current = new Set(page.messages.map((m) => m.id));
         setMessages((prev) => [...prev, ...page.messages].slice(-500));
+      } else if (firstLoad) {
+        initialIdsRef.current = new Set();
       }
       setRooms(r);
       setPeers(p);
@@ -99,6 +123,7 @@ export function RoomScreen({
 
   useEffect(() => {
     lastIdRef.current = "0";
+    initialIdsRef.current = null;
     setMessages([]);
     void refresh();
     // Push-driven refresh; the slow interval is only a safety net for a
@@ -149,14 +174,13 @@ export function RoomScreen({
 
   const sidebarW = 30;
   const feedWidth = Math.max(30, termWidth - sidebarW - 8);
-  const members = new Set<string>();
   const cur = rooms.find((r) => r.id === roomId);
 
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={colors.bg}>
       <Header
         left={`ns:${conn.namespace}  ws:${workspace}  #${roomId}`}
-        right="live feed (view only)"
+        right={<LiveDot label="live feed (view only)" />}
       />
       <box flexDirection="row" flexGrow={1} padding={1} gap={1}>
         <box
@@ -192,10 +216,16 @@ export function RoomScreen({
                 </text>
               </box>
             ) : (
-              messages.map((m) => {
-                members.add(m.from);
-                return <MessageLine key={m.id} m={m} width={feedWidth} />;
-              })
+              messages.map((m) => (
+                <MessageLine
+                  key={m.id}
+                  m={m}
+                  width={feedWidth}
+                  animate={
+                    initialIdsRef.current !== null && !initialIdsRef.current.has(m.id)
+                  }
+                />
+              ))
             )}
           </scrollbox>
         </box>

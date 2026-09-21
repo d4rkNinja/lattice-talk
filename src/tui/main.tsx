@@ -8,4 +8,5 @@ import { App } from "./App.js";
 const forceSetup = process.argv.slice(2).includes("--setup");
 
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
+renderer.setTerminalTitle("lattice-talk");
 createRoot(renderer).render(<App forceSetup={forceSetup} />);

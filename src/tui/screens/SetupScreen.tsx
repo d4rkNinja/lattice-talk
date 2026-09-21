@@ -2,7 +2,7 @@ import { useKeyboard } from "@opentui/react";
 import { useState } from "react";
 import { saveFileConfig, type ResolvedConnection } from "../../cli/config-file.js";
 import { pingBus } from "../bus.js";
-import { Footer, Header, Key } from "../components.js";
+import { Footer, Header, Key, Spinner } from "../components.js";
 import { colors } from "../theme.js";
 
 interface Field {
@@ -149,9 +149,11 @@ export function SetupScreen({
             width={20}
             onMouseDown={() => void submit()}
           >
-            <text fg={focus === BUTTON_INDEX ? colors.accent : colors.fg}>
-              {busy ? "  testing… " : "→ test & save"}
-            </text>
+            {busy ? (
+              <Spinner label="testing" />
+            ) : (
+              <text fg={focus === BUTTON_INDEX ? colors.accent : colors.fg}>→ test & save</text>
+            )}
           </box>
           {error ? <text fg={colors.bad}>✗ {error}</text> : null}
         </box>

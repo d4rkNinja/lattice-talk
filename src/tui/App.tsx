@@ -11,6 +11,7 @@ import { colors } from "./theme.js";
 import { RoomsScreen } from "./screens/RoomsScreen.js";
 import { RoomScreen } from "./screens/RoomScreen.js";
 import { SetupScreen } from "./screens/SetupScreen.js";
+import { Spinner } from "./components.js";
 
 type View =
   | { type: "rooms" }
@@ -81,7 +82,7 @@ export function App({ forceSetup = false }: { forceSetup?: boolean }) {
         justifyContent="center"
         alignItems="center"
       >
-        <text fg={colors.accent}>connecting…</text>
+        <Spinner label="connecting to your bus" />
       </box>
     );
   }

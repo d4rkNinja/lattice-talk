@@ -13,6 +13,7 @@ import {
 } from "../bus.js";
 import {
   ConfirmModal,
+  FadeIn,
   Footer,
   Header,
   InputModal,
@@ -167,7 +168,7 @@ export function RoomsScreen({
         left={`ns:${conn.namespace}  ws:${workspace}`}
         right={`${onlineCount}/${peerCount} agents online`}
       />
-      <box flexDirection="row" flexGrow={1} padding={1} gap={1}>
+      <FadeIn flexDirection="row" flexGrow={1} padding={1} gap={1} duration={200}>
         <box
           border
           borderStyle="rounded"
@@ -243,7 +244,7 @@ export function RoomsScreen({
             workspace.
           </text>
         </box>
-      </box>
+      </FadeIn>
       <Footer>
         <Key k="↑↓/jk" label="move" />
         <Key k="⏎" label="open" />
