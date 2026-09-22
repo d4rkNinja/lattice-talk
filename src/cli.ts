@@ -61,6 +61,7 @@ Usage:
   lattice-talk mcp list        Show harness install status
   lattice-talk mcp add <h>...  Install into harnesses (claude codex gemini cursor windsurf grok | all)
   lattice-talk mcp remove <h>… Remove from harnesses
+  lattice-talk mcp refresh     Re-write harness installs (run after updating)
   lattice-talk commands list   Show /l-talk-new command status per harness
   lattice-talk commands add    Install the /l-talk-new join command
   lattice-talk commands remove Remove the join command
@@ -195,6 +196,9 @@ async function mcpCommand(rest: string[]): Promise<number> {
     printMcpStatus();
     return 0;
   }
+  if (sub === "refresh") {
+    return mcpRefresh(rest.slice(1));
+  }
   if (sub !== "add" && sub !== "remove" && sub !== "rm") {
     err(`Unknown mcp subcommand: ${sub}`);
     printHelp();
@@ -258,6 +262,55 @@ async function mcpCommand(rest: string[]): Promise<number> {
   }
   out("\nRestart the harness to pick up the `lattice` MCP server.");
   out(`Then type ${commandInvoke(specs[0]!)} in a session to join the bus.`);
+  return 0;
+}
+
+/**
+ * Re-writes the `lattice` entry (and `/l-talk-new`) in every harness that
+ * already has one — run after updating lattice-talk so harnesses stop
+ * launching a stale cached copy, or after moving a global install.
+ */
+async function mcpRefresh(ids: string[]): Promise<number> {
+  const specs =
+    ids.length > 0
+      ? resolveHarnesses(ids).specs
+      : HARNESSES.filter((h) => isInstalled(h));
+  if (ids.length > 0) {
+    const { unknown } = resolveHarnesses(ids);
+    if (unknown.length > 0) {
+      err(`Unknown harness(es): ${unknown.join(", ")}. Known: ${HARNESSES.map((h) => h.id).join(", ")}, all.`);
+      return 1;
+    }
+  }
+  if (specs.length === 0) {
+    out("No harnesses have lattice installed — nothing to refresh.");
+    return 0;
+  }
+  const { config } = loadFileConfig();
+  const conn = resolveConnection(config);
+  const env = connectionToHarnessEnv(conn);
+  const entry = mcpEntry(env);
+  const prompt = joinPromptFor(conn);
+  for (const spec of specs) {
+    if (!isInstalled(spec)) {
+      out(`  ${spec.id}: not installed — skipping`);
+      continue;
+    }
+    try {
+      installHarness(spec, entry);
+      out(`  ${spec.id}: refreshed → ${spec.configPath(homedir())}`);
+    } catch (e) {
+      err(`  ${spec.id}: failed — ${e instanceof Error ? e.message : e}`);
+    }
+    try {
+      if (joinCommandInstalled(spec)) {
+        installJoinCommands(spec, prompt);
+      }
+    } catch {
+      // join-command refresh is best-effort
+    }
+  }
+  out("\nRestart running harnesses to pick up the refreshed `lattice` server.");
   return 0;
 }
 

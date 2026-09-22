@@ -76,10 +76,38 @@ export async function updateCommand(
     child.on("exit", (code) => {
       if (code === 0) {
         out(`Updated to ${latest} — restart lattice-talk (or l-talk) to use it.`);
-      } else {
-        err(`Update failed (exit ${code}). Run it manually: npm install -g ${PACKAGE_NAME}@latest`);
+        refreshHarnesses(out, err).then(() => resolve(0));
+        return;
       }
+      err(`Update failed (exit ${code}). Run it manually: npm install -g ${PACKAGE_NAME}@latest`);
       resolve(code ?? 1);
     });
+  });
+}
+
+/**
+ * After a global update, re-run `mcp refresh` through the *new* binary so
+ * installed harnesses pick up the current launch command — otherwise they
+ * keep spawning the copy npx cached before the update. Best-effort: on any
+ * failure we just print the manual command.
+ */
+function refreshHarnesses(
+  out: (s: string) => void,
+  err: (s: string) => void,
+): Promise<void> {
+  return new Promise((resolve) => {
+    out("Refreshing installed harness MCP entries…");
+    const child = spawn("lattice-talk", ["mcp", "refresh"], {
+      stdio: "inherit",
+      shell: true, // resolve the lattice-talk(.cmd) bin shim on every platform
+    });
+    const done = (ok: boolean) => {
+      if (!ok) {
+        err(`Couldn't auto-refresh harnesses — run it once manually: lattice-talk mcp refresh`);
+      }
+      resolve();
+    };
+    child.on("error", () => done(false));
+    child.on("exit", (code) => done(code === 0));
   });
 }

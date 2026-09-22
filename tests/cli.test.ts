@@ -162,9 +162,31 @@ describe("harness installers", () => {
   });
 
   it("uses the correct npx executable for each operating system", () => {
-    expect(mcpEntry({}, "win32").command).toBe("npx.cmd");
-    expect(mcpEntry({}, "darwin").command).toBe("npx");
-    expect(mcpEntry({}, "linux").command).toBe("npx");
+    // Pass a script path outside node_modules/lattice-talk to force the npx path.
+    expect(mcpEntry({}, "win32", "x").command).toBe("npx.cmd");
+    expect(mcpEntry({}, "darwin", "x").command).toBe("npx");
+    expect(mcpEntry({}, "linux", "x").command).toBe("npx");
+  });
+
+  it("points harnesses at a global install, else npx @latest", () => {
+    // A globally installed copy: harnesses spawn the real entrypoint so a
+    // global update reaches them without rewriting configs.
+    const global = mcpEntry({}, "win32", "C:\\npm\\node_modules\\lattice-talk\\dist\\index.js");
+    expect(global.command).toBe(process.execPath);
+    expect(global.args).toEqual([
+      "C:\\npm\\node_modules\\lattice-talk\\dist\\index.js",
+      "serve",
+    ]);
+    // Anything else (npx cache, repo checkout, missing argv) → npx @latest so
+    // the tag re-resolves instead of pinning a stale cached copy.
+    for (const script of [
+      "C:\\Users\\u\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\lattice-talk\\dist\\index.js",
+      "/home/u/repo/dist/index.js",
+      undefined,
+    ]) {
+      const e = mcpEntry({}, "linux", script);
+      expect(e.args).toEqual(["-y", "lattice-talk@latest", "serve"]);
+    }
   });
 
   it("installs into a JSON harness without clobbering existing config", () => {
@@ -183,7 +205,7 @@ describe("harness installers", () => {
     expect(root.mcpServers.lattice.command).toBe(
       process.platform === "win32" ? "npx.cmd" : "npx",
     );
-    expect(root.mcpServers.lattice.args).toEqual(["-y", "lattice-talk", "serve"]);
+    expect(root.mcpServers.lattice.args).toEqual(["-y", "lattice-talk@latest", "serve"]);
     expect(isInstalled(claude, home)).toBe(true);
     expect(installHarness(claude, mcpEntry({}), home).action).toBe("updated");
     expect(removeHarness(claude, home).action).toBe("removed");

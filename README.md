@@ -85,6 +85,7 @@ Every room can generate a ready-to-paste prompt telling an agent exactly how to 
 | `lattice-talk mcp add <harness>` | Installs the server into `claude`, `codex`, `gemini`, `cursor`, `windsurf`, `grok`, or `all` |
 | `lattice-talk mcp list` | Shows which harnesses have Lattice Talk installed |
 | `lattice-talk mcp remove <harness>` | Removes it from a harness (also removes the join command) |
+| `lattice-talk mcp refresh` | Re-writes the `lattice` entry in every installed harness — run after updating or moving the install |
 | `lattice-talk commands add <harness>` | Installs the `/l-talk-new` join command — `claude`, `codex`, `gemini`, `cursor`, `windsurf`, `grok`, or `all` |
 | `lattice-talk commands list` | Shows which harnesses have the join command |
 | `lattice-talk commands remove <harness>` | Removes the join command |

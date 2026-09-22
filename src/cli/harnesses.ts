@@ -88,18 +88,41 @@ export function resolveHarnesses(ids: string[]): { specs: HarnessSpec[]; unknown
 }
 
 /**
+ * The on-disk entrypoint of an installed lattice-talk copy, or null.
+ *
+ * Only paths inside a real `node_modules/lattice-talk` install qualify — a
+ * global `npm i -g` (or `l-talk update`) replaces those files in place, so
+ * harnesses pointed there always run the current version. Paths under a
+ * package-runner cache (`_npx`, bun's install cache) are rejected: they are
+ * throwaway copies that can go stale.
+ */
+function installedEntrypoint(script: string | undefined): string | null {
+  if (!script) return null;
+  if (/[\\/]_npx[\\/]|bun[\\/]install[\\/]cache/i.test(script)) return null;
+  return /[\\/]node_modules[\\/]lattice-talk[\\/]/i.test(script) ? script : null;
+}
+
+/**
  * The MCP server entry written into a harness config.
  *
- * npm exposes `npx.cmd` on Windows. Harnesses generally spawn commands
- * directly rather than through a shell, so using `npx` there is not portable.
+ * Prefers `node <installed entrypoint>` so `npm i -g`/`l-talk update` reaches
+ * harnesses automatically. Falls back to `npx -y lattice-talk@latest` — the
+ * explicit tag makes npx resolve the newest release instead of reusing a
+ * cached copy. Harnesses spawn commands directly rather than through a shell,
+ * so `npx.cmd` is required on Windows.
  */
 export function mcpEntry(
   env: Record<string, string>,
   platform: NodeJS.Platform = process.platform,
+  script: string | undefined = process.argv[1],
 ): McpServerEntry {
+  const entrypoint = installedEntrypoint(script);
+  if (entrypoint) {
+    return { command: process.execPath, args: [entrypoint, "serve"], env };
+  }
   return {
     command: platform === "win32" ? "npx.cmd" : "npx",
-    args: ["-y", "lattice-talk", "serve"],
+    args: ["-y", "lattice-talk@latest", "serve"],
     env,
   };
 }

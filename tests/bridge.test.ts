@@ -93,7 +93,7 @@ describe("ACP driver (gemini/cursor/claude-adapter protocol)", () => {
       cwd: process.cwd(),
       env: { FAKE_LOG: log },
       mcpServers: [
-        { name: "lattice", command: "npx", args: ["-y", "lattice-talk", "serve"], env: [] },
+        { name: "lattice", command: "npx", args: ["-y", "lattice-talk@latest", "serve"], env: [] },
       ],
       initialPrompt: "join the bus",
       onEvent: (l) => events.push(l),

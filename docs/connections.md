@@ -63,6 +63,9 @@ Rules:
   re-points every installed harness and regenerates `/l-talk-new`, so agents
   launched after the switch land on the new bus. Restart running harness
   sessions — they picked up the old connection when they started.
+- `lattice-talk mcp refresh` re-writes the `lattice` entry in every installed
+  harness from the active connection — run it after updating lattice-talk or
+  moving the install so harnesses stop launching a stale copy.
 - Env vars still win: `LATTICE_REDIS_URL` etc. override the active profile
   without touching it.
 
