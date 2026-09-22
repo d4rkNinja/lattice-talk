@@ -41,6 +41,10 @@ export class AcpDriver implements HarnessDriver {
   private sessionId = "";
   private sendQueue: Promise<unknown> = Promise.resolve();
 
+  get sessionRef(): string | undefined {
+    return this.sessionId || undefined;
+  }
+
   constructor(id: string, spec: AcpSpec, shell?: boolean) {
     this.id = id;
     this.spec = spec;
@@ -104,11 +108,7 @@ export class AcpDriver implements HarnessDriver {
         },
         clientInfo: { name: "lattice-talk-bridge", version: "0" },
       })) as { authMethods?: { id: string }[] };
-      const res = (await rpc.request("session/new", {
-        cwd: opts.cwd,
-        mcpServers: opts.mcpServers.map(serializeMcpServer),
-      })) as { sessionId?: string };
-      this.sessionId = res.sessionId ?? "";
+      this.sessionId = await this.openSession(rpc, opts);
     } catch (err) {
       const auth = init?.authMethods?.[0]?.id;
       throw new Error(
@@ -120,6 +120,36 @@ export class AcpDriver implements HarnessDriver {
     if (!this.sessionId) throw new Error(`${this.id} returned no sessionId`);
 
     await this.send(opts.initialPrompt);
+  }
+
+  /**
+   * Respawn path: try session/resume (no replay) then session/load (full
+   * replay) so a woken agent keeps its context. Agents that can't resume
+   * either fall through to session/new. Errors are swallowed — the caller's
+   * join prompt re-establishes identity on a fresh session regardless.
+   */
+  private async openSession(rpc: NdjsonRpc, opts: DriverOpts): Promise<string> {
+    const mcpServers = opts.mcpServers.map(serializeMcpServer);
+    if (opts.resumeRef) {
+      for (const method of ["session/resume", "session/load"] as const) {
+        try {
+          await rpc.request(method, {
+            sessionId: opts.resumeRef,
+            cwd: opts.cwd,
+            mcpServers,
+          });
+          return opts.resumeRef;
+        } catch {
+          // capability absent or session gone — try the next mechanism
+        }
+      }
+      opts.onEvent?.(`[${this.id}] could not resume ${opts.resumeRef} — starting a fresh session`);
+    }
+    const res = (await rpc.request("session/new", {
+      cwd: opts.cwd,
+      mcpServers,
+    })) as { sessionId?: string };
+    return res.sessionId ?? "";
   }
 
   /** Serialized prompts — ACP sessions process input one turn at a time. */

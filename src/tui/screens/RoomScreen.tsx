@@ -420,6 +420,7 @@ export function RoomScreen({
                       {"    "}
                       {p.agent_id} {glyphs.sep} {p.role}
                       {p.harness !== "unknown" ? ` ${glyphs.sep} ${p.harness}` : ""}
+                      {p.wake ? ` ${glyphs.sep} auto-wake` : ""}
                     </text>
                   </>
                 );

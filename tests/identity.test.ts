@@ -135,6 +135,31 @@ describe("tell_agent validation before Redis mutation", () => {
     expect(await store.listDmPartners("s1", "fe")).toEqual([]);
   });
 
+  it("reports recipient_online and recipient_wake honestly", async () => {
+    const store = new MemoryStore("dm-status");
+    const a = makeDeps(store);
+    const b = makeDeps(store);
+    await joinSession(a, { session_id: "s1", role: "fe", agent_id: "fe" });
+    await joinSession(b, { session_id: "s1", role: "be", agent_id: "be" });
+
+    const live = await tellAgent(a, { to_agent_id: "be", body: "hi" });
+    expect(live.recipient_online).toBe(true);
+    expect(live.recipient_wake).toBeNull();
+
+    // Task done, process gone — presence expires/clears but the record stays.
+    await store.clearPresence("s1", "be");
+    const queued = await tellAgent(a, { to_agent_id: "be", body: "queued" });
+    expect(queued.recipient_online).toBe(false);
+    expect(queued.recipient_wake).toBeNull();
+
+    // A supervisor advertising wake:"bridge" surfaces to the sender.
+    const be = await store.getAgent("s1", "be");
+    await store.putAgent("s1", { ...be!, wake: "bridge" });
+    const supervised = await tellAgent(a, { to_agent_id: "be", body: "wake it" });
+    expect(supervised.recipient_online).toBe(false);
+    expect(supervised.recipient_wake).toBe("bridge");
+  });
+
   it("happy path still delivers a DM", async () => {
     const store = new MemoryStore("dm");
     const a = makeDeps(store);

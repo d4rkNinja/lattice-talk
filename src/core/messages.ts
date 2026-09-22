@@ -145,7 +145,13 @@ export async function tellAgent(
     body: string;
     kind?: string;
   },
-): Promise<{ message_id: string; pair: string; session_id: string }> {
+): Promise<{
+  message_id: string;
+  pair: string;
+  session_id: string;
+  recipient_online: boolean;
+  recipient_wake: string | null;
+}> {
   const { sessionId, agentId: from } = await requireJoinedSession(deps, input.session_id);
   const to = assertId(input.to_agent_id, "to_agent_id");
   if (from === to) {
@@ -178,7 +184,16 @@ export async function tellAgent(
     id: messageId,
     from,
   });
-  return { message_id: messageId, pair, session_id: sessionId };
+  // Honest delivery signal: the write is durable either way, but an offline
+  // recipient only sees it on its next pull unless a supervisor respawns it.
+  const online = await deps.store.presenceStatus(sessionId, [to]);
+  return {
+    message_id: messageId,
+    pair,
+    session_id: sessionId,
+    recipient_online: Boolean(online[to]),
+    recipient_wake: recipient.wake ?? null,
+  };
 }
 
 export interface PullResult {

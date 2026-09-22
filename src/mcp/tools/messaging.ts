@@ -23,7 +23,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     "tell_agent",
     {
       description:
-        "Send a DM from this joined process to another agent in this session. Stored on the sorted pair stream (a:b). The recipient reads it with pull_messages inbox=true.",
+        "Send a DM from this joined process to another agent in this session. Stored durably on the sorted pair stream (a:b). The result reports recipient_online: when false, the message is queued until the agent next joins — or its supervisor (recipient_wake field, e.g. \"bridge\") respawns it. The recipient reads it with pull_messages inbox=true.",
       inputSchema: tellAgentSchema,
       outputSchema: tellAgentOutputSchema,
       annotations: write("Tell agent"),

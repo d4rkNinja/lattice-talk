@@ -296,6 +296,10 @@ export const tellAgentOutputSchema = z.object({
   message_id: z.string(),
   pair: z.string(),
   session_id: z.string(),
+  /** Whether the recipient's presence is live right now. */
+  recipient_online: z.boolean(),
+  /** What can wake the recipient while it's offline — e.g. "bridge". Null = queued only. */
+  recipient_wake: z.string().nullable(),
 });
 
 export const tellRoomOutputSchema = z.object({

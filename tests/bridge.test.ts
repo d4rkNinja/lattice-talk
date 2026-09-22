@@ -191,13 +191,21 @@ describe("Codex app-server driver", () => {
 
 class FakeDriver implements HarnessDriver {
   readonly id = "fake";
+  readonly sessionRef: string;
   sent: string[] = [];
   initialPrompt = "";
   closed = false;
+  resumeRefs: (string | undefined)[] = [];
   private onExit?: (code: number | null) => void;
+
+  constructor(sessionRef = "fake-session-1") {
+    this.sessionRef = sessionRef;
+  }
+
   async start(opts: DriverOpts) {
     this.initialPrompt = opts.initialPrompt;
     this.onExit = opts.onExit;
+    this.resumeRefs.push(opts.resumeRef);
     this.sent.push(opts.initialPrompt);
   }
   async send(text: string) {
@@ -309,6 +317,104 @@ describe("runBridge pump", () => {
     await bridge; // resolves on its own — no abort needed
     expect(driver.closed).toBe(true);
     expect(logs.some((l) => l.includes("agent process exited"))).toBe(true);
+  });
+
+  it("persistent bridge respawns a dead agent on new mail and replays the queue", async () => {
+    const store = new MemoryStore("test");
+    const fe = makeDeps(store, testConfig());
+    const bot = makeDeps(store, testConfig());
+    const ac = new AbortController();
+    const drivers: FakeDriver[] = [];
+    const logs: string[] = [];
+
+    const bridge = runBridge({
+      harness: "claude",
+      conn: { namespace: "test", workspace: "w1" },
+      roomId: "main",
+      persistent: true,
+      driverFactory: () => {
+        const d = new FakeDriver(`sess-${drivers.length + 1}`);
+        drivers.push(d);
+        return d;
+      },
+      signal: ac.signal,
+      store,
+      log: (l) => logs.push(l),
+    });
+    await waitUntil(() => drivers.length === 1);
+    expect(drivers[0]!.resumeRefs).toEqual([undefined]); // first spawn: nothing to resume
+
+    // The bridged agent joins; discovery locks on it and marks it wakeable.
+    await joinSession(bot, { session_id: "w1", role: "bot", agent_id: "bot", harness: "claude" });
+    await joinSession(fe, { session_id: "w1", role: "f", agent_id: "fe" });
+    await waitUntil(() => logs.some((l) => l.includes("bot")));
+    await sleep(80); // let markWakeable settle
+    expect((await store.getAgent("w1", "bot"))?.wake).toBe("bridge");
+
+    // Live delivery while the agent is up.
+    await tellRoom(fe, { room_id: "main", body: "while alive" });
+    await waitUntil(() => drivers[0]!.sent.some((s) => s.includes("while alive")));
+
+    // The agent finishes its task and its process exits — the bridge must NOT die.
+    drivers[0]!.exit(0);
+    await sleep(80);
+    expect(drivers).toHaveLength(1); // no respawn yet — nothing to deliver
+    const status = await store.presenceStatus("w1", ["bot"]);
+    expect(status["bot"]).toBe(false); // presence freed
+
+    // Sender sees the truth: offline, but a supervisor can wake it.
+    const sent = await tellAgent(fe, { to_agent_id: "bot", body: "next task" });
+    expect(sent.recipient_online).toBe(false);
+    expect(sent.recipient_wake).toBe("bridge");
+
+    // …and the supervisor does wake it, resuming the harness session.
+    await waitUntil(() => drivers.length === 2);
+    expect(drivers[1]!.resumeRefs).toEqual(["sess-1"]);
+    await waitUntil(() => drivers[1]!.sent.some((s) => s.includes("[lattice · dm · fe] next task")));
+    expect(logs.some((l) => l.includes("staying subscribed"))).toBe(true);
+
+    // Bridge shutdown clears the wake marker.
+    ac.abort();
+    await bridge;
+    expect((await store.getAgent("w1", "bot"))?.wake).toBeUndefined();
+  });
+
+  it("persistent bridge does not replay injected history on respawn", async () => {
+    const store = new MemoryStore("test");
+    const fe = makeDeps(store, testConfig());
+    const ac = new AbortController();
+    const drivers: FakeDriver[] = [];
+    const bridge = runBridge({
+      harness: "claude",
+      conn: { namespace: "test", workspace: "w1" },
+      roomId: "main",
+      agentId: "bot",
+      persistent: true,
+      driverFactory: () => {
+        const d = new FakeDriver();
+        drivers.push(d);
+        return d;
+      },
+      signal: ac.signal,
+      store,
+    });
+    await waitUntil(() => drivers.length === 1);
+    await joinSession(fe, { session_id: "w1", role: "f", agent_id: "fe" });
+
+    await tellRoom(fe, { room_id: "main", body: "delivered once" });
+    await waitUntil(() => drivers[0]!.sent.some((s) => s.includes("delivered once")));
+    const seen = drivers[0]!.sent.filter((s) => s.includes("delivered once")).length;
+    expect(seen).toBe(1);
+
+    drivers[0]!.exit(0);
+    await sleep(60);
+    await tellRoom(fe, { room_id: "main", body: "after death" });
+    await waitUntil(() => drivers.length === 2);
+    await waitUntil(() => drivers[1]!.sent.some((s) => s.includes("after death")));
+    // The respawned agent must not get "delivered once" a second time.
+    expect(drivers[1]!.sent.every((s) => !s.includes("delivered once"))).toBe(true);
+    ac.abort();
+    await bridge;
   });
 
   it("delivers DMs immediately for a pinned --agent-id (no discovery wait)", async () => {

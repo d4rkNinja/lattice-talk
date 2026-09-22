@@ -306,6 +306,8 @@ export interface AgentRow {
   role: string;
   harness: string;
   online: boolean;
+  /** Set when a supervisor (e.g. a --keep bridge) can respawn this agent. */
+  wake?: string;
 }
 
 /**

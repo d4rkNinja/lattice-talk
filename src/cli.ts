@@ -74,7 +74,10 @@ Usage:
     connections remove <name>        Delete a profile
   lattice-talk bridge <h>      Spawn an agent programmatically and push bus
                               messages into it (claude | codex | gemini | cursor)
-                              Options: --workspace --room --agent-id --cwd
+                              Options: --workspace --room --agent-id --cwd --keep
+  lattice-talk watch <h>       Bridge that never dies — stays subscribed when
+                              the agent exits and respawns it (resuming its
+                              harness session) the moment new mail arrives
   lattice-talk --version       Print version
   lattice-talk --help          This help
 
@@ -485,7 +488,7 @@ function parseFlags(rest: string[]): { harness?: string; flags: Map<string, stri
 async function bridgeCommand(rest: string[]): Promise<number> {
   const { harness, flags } = parseFlags(rest);
   if (!harness) {
-    err(`Usage: lattice-talk bridge <${BRIDGE_HARNESSES.join(" | ")}> [--workspace w] [--room r] [--agent-id id] [--cwd dir]`);
+    err(`Usage: lattice-talk bridge <${BRIDGE_HARNESSES.join(" | ")}> [--workspace w] [--room r] [--agent-id id] [--cwd dir] [--keep]`);
     return 1;
   }
   const { config } = loadFileConfig();
@@ -498,6 +501,7 @@ async function bridgeCommand(rest: string[]): Promise<number> {
       roomId: flags.get("room") || "main",
       agentId: flags.get("agent-id") || undefined,
       cwd: flags.get("cwd") || process.cwd(),
+      persistent: flags.has("keep") || flags.has("persistent") || flags.has("watch"),
       log: (line) => out(line),
     });
     return 0;
@@ -545,6 +549,9 @@ export async function main(argv: string[]): Promise<number> {
       return connectionsCommand(rest);
     case "bridge":
       return bridgeCommand(rest);
+    case "watch":
+      // A supervised bridge — respawns the agent on new mail.
+      return bridgeCommand([...rest, "--keep"]);
     case "help":
     case "--help":
     case "-h":

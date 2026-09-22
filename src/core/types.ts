@@ -25,6 +25,13 @@ export interface AgentRecord {
   harness: string;
   display_name: string;
   joined_at: string;
+  /**
+   * How this agent can be woken when its process is dead — currently
+   * "bridge" (a `lattice-talk bridge --keep` supervisor respawns it on new
+   * mail). Absent means: queued messages wait until the agent next joins.
+   * Set by the supervisor, not by join_session.
+   */
+  wake?: string;
 }
 
 export interface RoomMeta {

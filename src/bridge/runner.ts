@@ -28,8 +28,18 @@ export interface BridgeOptions {
   agentId?: string;
   cwd: string;
   log?: (line: string) => void;
+  /**
+   * Supervisor mode (`bridge --keep` / `lattice-talk watch`): the bridge
+   * stays subscribed after the agent process exits, and respawns it —
+   * resuming its harness session when the driver supports it — the moment
+   * new room/DM traffic arrives. Queued mail is replayed from parked stream
+   * cursors, so nothing is lost while the agent is down.
+   */
+  persistent?: boolean;
   /** Test seam: drive the pump without spawning a real process. */
   driver?: HarnessDriver;
+  /** Test seam: fresh driver per (re)spawn — persistent mode restarts. */
+  driverFactory?: () => HarnessDriver;
   /** Test seam: stop the bridge without relying on process signals. */
   signal?: AbortSignal;
   /** Extra env merged into the spawned process + bus config (tests set memory store). */
@@ -40,12 +50,15 @@ export interface BridgeOptions {
 
 const SWEEP_MS = 15_000;
 const DISCOVERY_TIMEOUT_MS = 120_000;
+const RESPAWN_MIN_MS = 2_000;
+const RESPAWN_MAX_MS = 60_000;
 const PAGE = 100;
 
 export function createDriver(harness: string): HarnessDriver {
-  if (harness === "codex") return new CodexDriver();
+  const win = process.platform === "win32";
+  if (harness === "codex") return new CodexDriver("codex", ["app-server"], win);
   const spec = ACP_SPECS[harness];
-  if (spec) return new AcpDriver(harness, spec);
+  if (spec) return new AcpDriver(harness, spec, win);
   throw new Error(`No bridge driver for "${harness}"`);
 }
 
@@ -68,8 +81,10 @@ function formatInjected(msg: LatticeMessage, roomId: string): string {
 /**
  * Long-running bus→session pump: subscribes to Lattice notify channels and
  * injects every new bus message into the spawned agent's session through its
- * programmatic interface. Resolves when the bridge is shut down or the agent
- * process dies.
+ * programmatic interface. With `persistent` it becomes a supervisor — an
+ * exited agent is respawned (with harness-session resume) the next time mail
+ * arrives for it. Resolves when the bridge is shut down, or — non-persistent —
+ * when the agent process dies.
  */
 export async function runBridge(opts: BridgeOptions): Promise<void> {
   if (!isBridgeHarness(opts.harness)) {
@@ -95,12 +110,12 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
   const roomId = opts.roomId;
   const ns = config.namespace;
   const log = opts.log ?? (() => {});
+  const persistent = opts.persistent === true;
 
   await ensureWorkspaceSession(deps, sessionId);
   await ensureRoom(deps, sessionId, roomId, "lattice-bridge");
   const preAgents = new Set(await store.listAgentIds(sessionId));
 
-  const driver = opts.driver ?? createDriver(opts.harness);
   const stop = new AbortController();
   opts.signal?.addEventListener("abort", () => stop.abort(), { once: true });
   let stopped = false;
@@ -110,6 +125,8 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
   // Bridge cursors — separate from any agent's read cursors so pushing never
   // disturbs what the agent still has to pull itself. Every stream starts
   // undefined: first sight parks at the tail so only new traffic is injected.
+  // A cursor only advances after the message was actually injected — while
+  // the agent is down they stay parked, and the backlog replays on respawn.
   const cursors = new Map<string, string>();
   const roomStream = keys.roomStream(ns, sessionId, roomId);
   await seedTail(roomStream);
@@ -124,10 +141,129 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     cursors.set(streamKey, cursor);
   }
 
-  const sendToAgent = (msg: LatticeMessage) =>
-    driver.send(formatInjected(msg, roomId)).catch((e) =>
-      log(`[bridge] inject failed: ${e instanceof Error ? e.message : e}`),
+  // ---------------------------------------------------------------------------
+  // Driver lifecycle: a dead agent is just parked mail until mail arrives.
+  // ---------------------------------------------------------------------------
+
+  let driver: HarnessDriver | undefined;
+  let sessionRef: string | undefined;
+  let spawning: Promise<void> | undefined;
+  let wakePending = false;
+  let spawnFailures = 0;
+  let lastSpawnFail = 0;
+  let wakeTimer: NodeJS.Timeout | undefined;
+  let firstSpawn = true;
+
+  const onDriverExit = (d: HarnessDriver, code: number | null) => {
+    if (driver !== d) return; // stale exit from a replaced driver
+    driver = undefined;
+    void d.close().catch(() => {}); // release the dead process handle now
+    if (!persistent) {
+      log(`[bridge] agent process exited (code ${code ?? "?"}) — shutting down.`);
+      stop.abort();
+      return;
+    }
+    log(
+      `[bridge] agent process exited (code ${code ?? "?"}) — staying subscribed; ` +
+        "it will be respawned when new messages arrive.",
     );
+    // The harness process is verifiably dead — freeing its presence lets a
+    // respawned session reclaim the same agent_id immediately instead of
+    // waiting out the TTL.
+    if (bridgedAgentId) {
+      void store
+        .clearPresence(sessionId, bridgedAgentId)
+        .catch(() => {});
+    }
+    if (code !== 0) {
+      // Crashed mid-work: treat as mail pending so it comes back promptly.
+      wakePending = true;
+    }
+    // Pending mail (or a crash) respawns now — a clean exit with nothing
+    // queued just keeps the subscription idle.
+    void maybeRespawn();
+  };
+
+  async function spawn(resume: boolean): Promise<void> {
+    const d =
+      firstSpawn && opts.driver
+        ? opts.driver
+        : (opts.driverFactory?.() ?? createDriver(opts.harness));
+    firstSpawn = false;
+    await d.start({
+      cwd: opts.cwd,
+      env,
+      mcpServers: [latticeMcpSpec(env)],
+      initialPrompt: bridgeJoinPrompt({
+        workspace: sessionId,
+        roomId,
+        harness: opts.harness,
+        suggestedAgentId: bridgedAgentId ?? opts.agentId,
+        tokenProtected: Boolean(opts.conn.joinToken),
+      }),
+      resumeRef: resume ? sessionRef : undefined,
+      onEvent: log,
+      onExit: (code) => onDriverExit(d, code),
+    });
+    driver = d;
+    spawnFailures = 0;
+    sessionRef = d.sessionRef ?? sessionRef;
+    log(
+      `[bridge] ${opts.harness} session ${resume ? "respawned" : "up"} — injecting room "${roomId}" traffic into it.`,
+    );
+  }
+
+  function maybeRespawn(): void {
+    if (!persistent || stopped || driver || spawning || !wakePending) return;
+    if (spawnFailures > 0) {
+      const wait = Math.min(RESPAWN_MAX_MS, RESPAWN_MIN_MS * 2 ** (spawnFailures - 1));
+      const elapsed = Date.now() - lastSpawnFail;
+      if (elapsed < wait) {
+        wakeTimer ??= setTimeout(() => {
+          wakeTimer = undefined;
+          maybeRespawn();
+        }, wait - elapsed);
+        wakeTimer.unref?.();
+        return;
+      }
+    }
+    wakePending = false;
+    spawning = (async () => {
+      try {
+        await spawn(true);
+        await sweep();
+      } catch (e) {
+        spawnFailures += 1;
+        lastSpawnFail = Date.now();
+        wakePending = true;
+        log(`[bridge] respawn failed: ${e instanceof Error ? e.message : e}`);
+        maybeRespawn(); // schedules the backoff retry
+      } finally {
+        spawning = undefined;
+      }
+    })();
+  }
+
+  /**
+   * Inject one message; returns false when it couldn't be delivered (agent
+   * down) so callers leave the cursor parked for replay on respawn.
+   */
+  const sendToAgent = async (msg: LatticeMessage): Promise<boolean> => {
+    if (!driver) {
+      wakePending = true;
+      void maybeRespawn();
+      return false;
+    }
+    try {
+      await driver.send(formatInjected(msg, roomId));
+      return true;
+    } catch (e) {
+      log(`[bridge] inject failed: ${e instanceof Error ? e.message : e}`);
+      wakePending = true;
+      void maybeRespawn();
+      return false;
+    }
+  };
 
   async function drainStream(streamKey: string, dmPeer?: string): Promise<void> {
     let cursor = cursors.get(streamKey);
@@ -139,13 +275,19 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     }
     const entries = await store.readStreamAfter(streamKey, cursor, PAGE);
     for (const entry of entries) {
-      cursors.set(streamKey, entry.id);
       const msg = parseStreamMessage(entry);
       // Never echo the bridged agent's own output back at it.
-      if (bridgedAgentId && msg.from === bridgedAgentId) continue;
+      if (bridgedAgentId && msg.from === bridgedAgentId) {
+        cursors.set(streamKey, entry.id);
+        continue;
+      }
       // DMs addressed to someone else aren't ours to inject.
-      if (dmPeer && msg.to && msg.to !== bridgedAgentId) continue;
-      await sendToAgent(msg);
+      if (dmPeer && msg.to && msg.to !== bridgedAgentId) {
+        cursors.set(streamKey, entry.id);
+        continue;
+      }
+      if (!(await sendToAgent(msg))) return; // cursor stays parked — replay later
+      cursors.set(streamKey, entry.id);
     }
   }
 
@@ -168,6 +310,29 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     );
   }
 
+  /**
+   * Advertise on the agent record that a supervisor can respawn it — senders
+   * see wake:"bridge" in tell_agent results / list_peers instead of a silent
+   * queue. Re-patched after every respawned rejoin (join_session rewrites
+   * the record), cleared when the bridge shuts down for real.
+   */
+  async function markWakeable(): Promise<void> {
+    if (!persistent || !bridgedAgentId) return;
+    const agent = await store.getAgent(sessionId, bridgedAgentId);
+    if (agent && agent.wake !== "bridge") {
+      await store.putAgent(sessionId, { ...agent, wake: "bridge" });
+    }
+  }
+
+  async function clearWakeable(): Promise<void> {
+    if (!bridgedAgentId) return;
+    const agent = await store.getAgent(sessionId, bridgedAgentId).catch(() => null);
+    if (agent?.wake === "bridge") {
+      const { wake: _drop, ...rest } = agent;
+      await store.putAgent(sessionId, rest).catch(() => {});
+    }
+  }
+
   async function drainDms(): Promise<void> {
     if (!bridgedAgentId) return;
     for (const peer of await store.listDmPartners(sessionId, bridgedAgentId)) {
@@ -180,6 +345,7 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     if (stopped) return;
     try {
       await discoverAgent();
+      await markWakeable();
       await drainStream(roomStream);
       await drainDms();
     } catch (e) {
@@ -187,24 +353,12 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     }
   }
 
-  await driver.start({
-    cwd: opts.cwd,
-    env,
-    mcpServers: [latticeMcpSpec(env)],
-    initialPrompt: bridgeJoinPrompt({
-      workspace: sessionId,
-      roomId,
-      harness: opts.harness,
-      suggestedAgentId: opts.agentId,
-      tokenProtected: Boolean(opts.conn.joinToken),
-    }),
-    onEvent: log,
-    onExit: (code) => {
-      log(`[bridge] agent process exited (code ${code ?? "?"}) — shutting down.`);
-      stop.abort();
-    },
-  });
-  log(`[bridge] ${opts.harness} session up — injecting room "${roomId}" traffic into it.`);
+  try {
+    await spawn(false);
+  } catch (e) {
+    await store.close().catch(() => {});
+    throw e;
+  }
 
   // If the agent id is pinned, subscribe to its DM channel right away.
   if (bridgedAgentId) {
@@ -219,6 +373,7 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     (channel) => {
       if (channel === keys.notifyMeta(ns, sessionId)) {
         void discoverAgent().catch(() => {});
+        void markWakeable().catch(() => {});
       } else {
         void drainStream(roomStream).catch(() => {});
       }
@@ -250,11 +405,13 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     stopped = true;
     clearInterval(sweepTimer);
     clearTimeout(discoveryTimer);
+    if (wakeTimer) clearTimeout(wakeTimer);
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
     await unsub().catch(() => {});
     await dmUnsub?.().catch(() => {});
-    await driver.close().catch(() => {});
+    await clearWakeable().catch(() => {});
+    await driver?.close().catch(() => {});
     await store.close().catch(() => {});
   }
 }

@@ -17,6 +17,10 @@ export class CodexDriver implements HarnessDriver {
   private activeTurnId: string | null = null;
   private sendQueue: Promise<unknown> = Promise.resolve();
 
+  get sessionRef(): string | undefined {
+    return this.threadId || undefined;
+  }
+
   constructor(command = "codex", args = ["app-server"], shell?: boolean) {
     this.command = command;
     this.args = args;
@@ -58,11 +62,7 @@ export class CodexDriver implements HarnessDriver {
         clientInfo: { name: "lattice-talk-bridge", version: "0" },
       });
       rpc.notify("notifications/initialized");
-      const res = (await rpc.request("thread/start", {
-        cwd: opts.cwd,
-        experimentalRawEvents: false,
-      })) as { thread?: { id?: string } };
-      this.threadId = res?.thread?.id ?? "";
+      this.threadId = await this.openThread(rpc, opts);
     } catch (err) {
       throw new Error(
         `Could not start a Codex app-server session (${err instanceof Error ? err.message : err}). ` +
@@ -72,6 +72,32 @@ export class CodexDriver implements HarnessDriver {
     if (!this.threadId) throw new Error("Codex app-server returned no thread id");
 
     await this.send(opts.initialPrompt);
+  }
+
+  /**
+   * Respawn path: thread/resume re-hydrates the persisted thread so a woken
+   * agent keeps its context; older app-servers without it fall back to a
+   * fresh thread (the join prompt re-registers the bus identity).
+   */
+  private async openThread(rpc: NdjsonRpc, opts: DriverOpts): Promise<string> {
+    if (opts.resumeRef) {
+      try {
+        await rpc.request("thread/resume", {
+          threadId: opts.resumeRef,
+          cwd: opts.cwd,
+        });
+        return opts.resumeRef;
+      } catch {
+        opts.onEvent?.(
+          `[codex] could not resume ${opts.resumeRef} — starting a fresh thread`,
+        );
+      }
+    }
+    const res = (await rpc.request("thread/start", {
+      cwd: opts.cwd,
+      experimentalRawEvents: false,
+    })) as { thread?: { id?: string } };
+    return res?.thread?.id ?? "";
   }
 
   send(text: string): Promise<void> {
