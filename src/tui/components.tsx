@@ -253,7 +253,7 @@ export function InputModal({
   );
 }
 
-/** Pick an existing workspace session, or choose "+ New workspace". */
+/** Pick an existing workspace session, create one, or delete one. */
 export function WorkspaceModal({
   sessions,
   current,
@@ -282,9 +282,66 @@ export function WorkspaceModal({
             description: "create a fresh session",
             value: "__new__",
           },
+          {
+            name: `${glyphs.bullet} Delete a workspace…`,
+            description: "permanently remove a session and all its data",
+            value: "__delete__",
+          },
         ]}
         focused
         height={Math.min(10, sessions.length + 1)}
+        selectedBackgroundColor={colors.select}
+        selectedTextColor={colors.accent}
+        onSelect={(_i, opt) => {
+          if (opt) onPick(String(opt.value));
+        }}
+      />
+      <box flexDirection="row" gap={2}>
+        <Key k={glyphs.enter} label="choose" />
+        <Key k="esc" label="cancel" />
+      </box>
+    </Modal>
+  );
+}
+
+/** Pick which workspace session to permanently delete. */
+export function DeleteWorkspaceModal({
+  sessions,
+  current,
+  onPick,
+  onCancel,
+}: {
+  sessions: string[];
+  current: string;
+  onPick(value: string): void;
+  onCancel(): void;
+}) {
+  useKeyboard((key) => {
+    if (key.name === "escape") onCancel();
+  });
+  if (sessions.length === 0) {
+    return (
+      <Modal title="Delete workspace" width={50}>
+        <text fg={colors.muted}>No workspaces on this bus yet.</text>
+        <box flexDirection="row" gap={2}>
+          <Key k="esc" label="close" />
+        </box>
+      </Modal>
+    );
+  }
+  return (
+    <Modal title="Delete workspace" width={50}>
+      <text fg={colors.muted}>
+        Removes the session, its rooms, message history, agents, and memory.
+      </text>
+      <select
+        options={sessions.map((s) => ({
+          name: s === current ? `${s} (current)` : s,
+          description: "delete this workspace permanently",
+          value: s,
+        }))}
+        focused
+        height={Math.min(10, sessions.length)}
         selectedBackgroundColor={colors.select}
         selectedTextColor={colors.accent}
         onSelect={(_i, opt) => {

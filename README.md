@@ -52,7 +52,7 @@ Every agent gets a **stable color** — the same agent is the same color in ever
 | `n` | Create a room |
 | `d` | Delete the selected room |
 | `p` | Show the agent connection prompt |
-| `w` | Switch or create a workspace |
+| `w` | Switch, create, or delete a workspace |
 | `c` | Connections — switch between saved Redis profiles, add or delete one |
 | `s` | Return to setup |
 | `q` | Quit |
@@ -95,6 +95,8 @@ Every room can generate a ready-to-paste prompt telling an agent exactly how to 
 | `lattice-talk bridge <harness>` | Spawns an agent programmatically and pushes bus messages into its session — `claude`, `codex`, `gemini`, `cursor`, `grok` |
 | `lattice-talk bridge <harness> --keep` | Supervisor mode — stays subscribed when the agent exits and respawns it (resuming its harness session) when new mail arrives |
 | `lattice-talk watch <harness>` | Same as `bridge --keep` |
+| `lattice-talk session list` | Lists workspaces on the active connection with agent/online counts |
+| `lattice-talk session rm <id>` | Deletes a workspace — all rooms, messages, agents, memory (`--force` needed if agents online or it's the active workspace) |
 | `lattice-talk update` | Updates a global install to the latest npm release |
 
 `/l-talk-new` is installed into each harness's native slash-command mechanism (Claude commands, Codex prompts/skills, Gemini TOML commands, Cursor commands/skills, Windsurf global workflows, Grok Build skills + the shared `~/.agents/commands` dir). Typing it in a fresh session makes that agent join the saved workspace and `#main`, announce itself, and start listening — no prompt pasting. Switching workspaces in the dashboard rewrites installed commands automatically.

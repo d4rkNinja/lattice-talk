@@ -33,6 +33,14 @@ export interface Store {
   /** Session ids ever created in this namespace (index kept by initSessionMeta). */
   listSessions(): Promise<string[]>;
 
+  /**
+   * Drop a workspace entirely: meta, agents, presence, rooms, memberships,
+   * room + DM streams, cursors, memory, and the sessions-index entry.
+   * Admin surface only (CLI/TUI) — not exposed as an MCP tool. Publishes a
+   * meta notification so live clients refresh.
+   */
+  deleteSession(sessionId: string): Promise<void>;
+
   addRoom(sessionId: string, roomId: string, meta: RoomMeta): Promise<boolean>;
   listRooms(sessionId: string): Promise<string[]>;
   /**

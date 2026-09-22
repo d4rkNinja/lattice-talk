@@ -8,6 +8,7 @@ import {
   envWithFileDefaults,
   loadFileConfig,
   resolveConnection,
+  saveFileConfig,
 } from "./cli/config-file.js";
 import {
   commandInvoke,
@@ -36,6 +37,8 @@ import {
 } from "./cli/harnesses.js";
 import { agentJoinPrompt } from "./cli/prompt.js";
 import { pingBus } from "./tui/bus.js";
+import { loadConfig } from "./core/config.js";
+import { createStore } from "./core/store.js";
 import { DEFAULT_ROOM } from "./core/limits.js";
 import { updateCommand } from "./cli/update.js";
 import { runBridge } from "./bridge/runner.js";
@@ -78,6 +81,10 @@ Usage:
   lattice-talk watch <h>       Bridge that never dies — stays subscribed when
                               the agent exits and respawns it (resuming its
                               harness session) the moment new mail arrives
+  lattice-talk session list    List workspaces on the active connection
+  lattice-talk session rm <id> Delete a workspace — all rooms, messages,
+                              agents, memory. Needs --force when agents are
+                              online or it's your active workspace
   lattice-talk --version       Print version
   lattice-talk --help          This help
 
@@ -485,6 +492,82 @@ function parseFlags(rest: string[]): { harness?: string; flags: Map<string, stri
   return { harness, flags };
 }
 
+async function sessionCommand(rest: string[]): Promise<number> {
+  const sub = rest[0];
+  const { config } = loadFileConfig();
+  const conn = resolveConnection(config);
+  const store = await createStore(loadConfig(envWithFileDefaults()));
+  try {
+    if (!sub || sub === "list" || sub === "ls") {
+      const sessions = await store.listSessions();
+      if (sessions.length === 0) {
+        out(`No workspaces on ${describeConnection(conn)}.`);
+        return 0;
+      }
+      for (const s of sessions) {
+        const agents = await store.listAgents(s);
+        const status = await store.presenceStatus(s, agents.map((a) => a.agent_id));
+        const online = agents.filter((a) => status[a.agent_id]).length;
+        out(
+          `${s === conn.workspace ? ">" : " "} ${s}  ${agents.length} agent(s), ${online} online`,
+        );
+      }
+      return 0;
+    }
+
+    if (sub === "delete" || sub === "rm" || sub === "remove") {
+      const id = rest[1];
+      if (!id) {
+        err("Usage: lattice-talk session delete <workspace> [--force]");
+        return 1;
+      }
+      const sessions = await store.listSessions();
+      if (!sessions.includes(id)) {
+        err(`No workspace named ${JSON.stringify(id)} on this bus.`);
+        return 1;
+      }
+      const agents = await store.listAgents(id);
+      const status = await store.presenceStatus(id, agents.map((a) => a.agent_id));
+      const online = agents.filter((a) => status[a.agent_id]);
+      const isActive = conn.workspace === id;
+      const force = rest.includes("--force") || rest.includes("--yes") || rest.includes("-y");
+      if ((online.length > 0 || isActive) && !force) {
+        if (online.length > 0) {
+          err(`"${id}" has ${online.length} agent(s) online: ${online.map((a) => a.agent_id).join(", ")}`);
+        }
+        if (isActive) err(`"${id}" is your active workspace.`);
+        err("Re-run with --force to delete anyway — this removes all rooms, messages, agents, and memory.");
+        return 1;
+      }
+      await store.deleteSession(id);
+      out(
+        `Deleted workspace "${id}" — ${agents.length} agent record(s), all rooms, messages, and memory removed.`,
+      );
+      if (isActive) {
+        // Don't leave the active connection pointing at a deleted session.
+        const next = sessions.filter((s) => s !== id)[0];
+        const { config: cfg } = loadFileConfig();
+        if (cfg.active && cfg.profiles?.[cfg.active]) {
+          saveProfile(cfg.active, { ...conn, workspace: next });
+        } else {
+          saveFileConfig({ ...conn, workspace: next });
+        }
+        out(
+          next
+            ? `Active workspace is now "${next}".`
+            : "Active workspace cleared — pick a new one on next launch.",
+        );
+      }
+      return 0;
+    }
+
+    err(`Unknown session subcommand: ${sub} (list | delete)`);
+    return 1;
+  } finally {
+    await store.close().catch(() => {});
+  }
+}
+
 async function bridgeCommand(rest: string[]): Promise<number> {
   const { harness, flags } = parseFlags(rest);
   if (!harness) {
@@ -552,6 +635,11 @@ export async function main(argv: string[]): Promise<number> {
     case "watch":
       // A supervised bridge — respawns the agent on new mail.
       return bridgeCommand([...rest, "--keep"]);
+    case "session":
+    case "sessions":
+    case "workspace":
+    case "workspaces":
+      return sessionCommand(rest);
     case "help":
     case "--help":
     case "-h":

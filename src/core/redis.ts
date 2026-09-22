@@ -268,6 +268,34 @@ export class RedisStore implements Store {
     return ids.sort();
   }
 
+  async deleteSession(sessionId: string): Promise<void> {
+    // Every session-scoped key embeds the literal `:{sid}:` hash-tag token.
+    // SCAN broadly and filter in code — `{}` is glob alternation in MATCH
+    // patterns, so the braces can't be matched literally there.
+    const tag = `:${sessionTag(sessionId)}:`;
+    const pipeline = this.redis.pipeline();
+    let scanned = 0;
+    for await (const batch of this.redis.scanStream({
+      match: `lattice:${this.ns}:*`,
+      count: 200,
+    })) {
+      for (const key of batch as string[]) {
+        if (key.includes(tag)) {
+          pipeline.unlink(key);
+          scanned += 1;
+        }
+      }
+    }
+    pipeline.srem(keys.sessionsIndex(this.ns), sessionId);
+    await pipeline.exec();
+    // Wake listeners of the (now deleted) session so live clients refresh.
+    await publishNotify(this, keys.notifyMeta(this.ns, sessionId), {
+      type: "session_deleted",
+      session_id: sessionId,
+    });
+    void scanned; // counted for potential debugging; result is driven by the filter
+  }
+
   async listRooms(sessionId: string): Promise<string[]> {
     const rooms = await this.redis.smembers(keys.sessionRooms(this.ns, sessionId));
     return rooms.sort();

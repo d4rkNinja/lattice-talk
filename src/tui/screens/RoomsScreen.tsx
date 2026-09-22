@@ -19,15 +19,18 @@ import { pingBus } from "../bus.js";
 import { ensureRoom } from "../../core/rooms.js";
 import { ensureWorkspaceSession } from "../../core/session.js";
 import {
+  deleteWorkspace,
   listPeersView,
   listRoomsInfo,
   subscribeSessionMeta,
+  workspaceStats,
   type BusHandle,
   type RoomInfo,
 } from "../bus.js";
 import {
   ConfirmModal,
   ConnectionsModal,
+  DeleteWorkspaceModal,
   FadeIn,
   Footer,
   Header,
@@ -43,6 +46,8 @@ type ModalState =
   | { type: "delete"; room: RoomInfo }
   | { type: "prompt"; roomId?: string }
   | { type: "workspace" }
+  | { type: "workspace-delete" }
+  | { type: "workspace-confirm"; sessionId: string; agents: number; online: number }
   | { type: "new-workspace" }
   | { type: "connections" }
   | { type: "new-connection" }
@@ -158,6 +163,39 @@ export function RoomsScreen({
       } catch {}
       setModal(null);
       onWorkspaceChanged(ws);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setModal(null);
+    }
+  };
+
+  const pickWorkspaceToDelete = async (ws: string) => {
+    try {
+      const stats = await workspaceStats(bus, ws);
+      setModal({
+        type: "workspace-confirm",
+        sessionId: ws,
+        agents: stats.agents,
+        online: stats.online,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setModal(null);
+    }
+  };
+
+  const deleteWorkspaceFlow = async (ws: string) => {
+    try {
+      await deleteWorkspace(bus, ws);
+      if (ws === workspace) {
+        // Deleting the workspace we're looking at — hop to a surviving one
+        // (or a fresh "main") through the same path a manual switch takes.
+        const next = sessions.find((s) => s !== ws) ?? "main";
+        await switchWorkspace(next);
+      } else {
+        setModal(null);
+        void refresh();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setModal(null);
@@ -375,8 +413,28 @@ export function RoomsScreen({
           current={workspace}
           onPick={(v) => {
             if (v === "__new__") setModal({ type: "new-workspace" });
+            else if (v === "__delete__") setModal({ type: "workspace-delete" });
             else void switchWorkspace(v);
           }}
+          onCancel={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal?.type === "workspace-delete" ? (
+        <DeleteWorkspaceModal
+          sessions={sessions}
+          current={workspace}
+          onPick={(v) => void pickWorkspaceToDelete(v)}
+          onCancel={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal?.type === "workspace-confirm" ? (
+        <ConfirmModal
+          title={`Delete workspace "${modal.sessionId}"?`}
+          body={`Permanently removes the session: rooms, message history, ${modal.agents} agent record${modal.agents === 1 ? "" : "s"}${modal.online > 0 ? ` (${modal.online} online now)` : ""}, cursors, and memory. This cannot be undone.`}
+          confirmLabel="delete workspace"
+          onConfirm={() => void deleteWorkspaceFlow(modal.sessionId)}
           onCancel={() => setModal(null)}
         />
       ) : null}

@@ -105,6 +105,27 @@ export async function removePeer(
   });
 }
 
+/**
+ * Drop a whole workspace (session): every room, stream, agent record,
+ * presence, cursor, and memory entry under it. Callers confirm first — this
+ * is irreversible. Live clients refresh via the meta notification.
+ */
+export async function deleteWorkspace(
+  bus: BusHandle,
+  sessionId: string,
+): Promise<void> {
+  await bus.store.deleteSession(sessionId);
+}
+
+/** How many agents a workspace has and how many are online — confirm-modal stats. */
+export async function workspaceStats(
+  bus: BusHandle,
+  sessionId: string,
+): Promise<{ agents: number; online: number }> {
+  const peers = await listPeersView(bus, sessionId);
+  return { agents: peers.length, online: peers.filter((p) => p.online).length };
+}
+
 /** Read new room-stream entries after `afterId`; returns messages + new cursor. */
 export async function pollRoomMessages(
   bus: BusHandle,

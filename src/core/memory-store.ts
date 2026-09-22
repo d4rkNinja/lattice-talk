@@ -201,6 +201,22 @@ export class MemoryStore implements Store {
     return [...(this.sets.get(keys.sessionsIndex(this.ns)) ?? [])].sort();
   }
 
+  async deleteSession(sessionId: string): Promise<void> {
+    // Same rule as the Redis implementation: drop every key containing the
+    // session's literal `:{sid}:` hash-tag token, then unindex the session.
+    const tag = `:${sessionTag(sessionId)}:`;
+    for (const map of [this.strings, this.sets, this.hashes, this.streams]) {
+      for (const key of [...map.keys()]) {
+        if (key.includes(tag)) map.delete(key);
+      }
+    }
+    this.sets.get(keys.sessionsIndex(this.ns))?.delete(sessionId);
+    await publishNotify(this, keys.notifyMeta(this.ns, sessionId), {
+      type: "session_deleted",
+      session_id: sessionId,
+    });
+  }
+
   async listRooms(sessionId: string): Promise<string[]> {
     return [...(this.sets.get(keys.sessionRooms(this.ns, sessionId)) ?? [])].sort();
   }

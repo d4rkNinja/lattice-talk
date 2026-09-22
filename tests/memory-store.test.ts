@@ -171,6 +171,64 @@ describe("MemoryStore session bus", () => {
     await expect(joinSession(late, { session_id: "s1", role: "reviewer" })).resolves.toBeTruthy();
   });
 
+  it("deleteSession wipes every session key and leaves siblings untouched", async () => {
+    const store = new MemoryStore("test");
+    const a = makeDeps(store);
+    const b = makeDeps(store);
+    const other = makeDeps(store);
+
+    // Populate session s1 fully: two agents, rooms, room + DM traffic,
+    // cursors (from pulls), and memory.
+    await joinSession(a, { session_id: "s1", role: "fe", agent_id: "fe" });
+    await joinSession(b, { session_id: "s1", role: "be", agent_id: "be" });
+    await createRoom(a, { session_id: "s1", room_id: "design" });
+    await joinRoom(b, { session_id: "s1", room_id: "design" });
+    await tellRoom(a, { session_id: "s1", room_id: "design", body: "room msg" });
+    await tellAgent(a, { session_id: "s1", to_agent_id: "be", body: "dm msg" });
+    await pullMessages(b, { session_id: "s1", room_id: "design" });
+    await pullMessages(b, { session_id: "s1", inbox: true });
+    await memorySet(a, { session_id: "s1", key: "api", value: "v1" });
+    await memoryNote(a, { session_id: "s1", body: "note body" });
+
+    // A neighbouring session that must survive intact.
+    await joinSession(other, { session_id: "s2", role: "x", agent_id: "x1" });
+    await tellRoom(other, { session_id: "s2", body: "untouched" });
+
+    expect(await store.listSessions()).toEqual(["s1", "s2"]);
+    await store.deleteSession("s1");
+
+    // Everything under s1 is gone.
+    expect(await store.listSessions()).toEqual(["s2"]);
+    expect(await store.getSessionMeta("s1")).toBeNull();
+    expect(await store.listAgents("s1")).toEqual([]);
+    expect(await store.listRooms("s1")).toEqual([]);
+    expect(await store.listDmPartners("s1", "be")).toEqual([]);
+    expect(await store.getCursor("s1", "be", "design")).toBeNull();
+    expect(await store.memoryGet("s1", "api")).toBeNull();
+    expect((await store.presenceStatus("s1", ["fe"]))["fe"]).toBe(false);
+
+    // s2 is untouched.
+    expect(await store.listAgents("s2")).toHaveLength(1);
+    expect(await store.listRooms("s2")).toEqual(["main"]);
+    const s2pull = await pullMessages(other, { session_id: "s2", room_id: "main" });
+    expect(s2pull.messages[0]?.body).toBe("untouched");
+  });
+
+  it("deleteSession tolerates names that are substrings of other sessions", async () => {
+    const store = new MemoryStore("test");
+    const a = makeDeps(store);
+    const b = makeDeps(store);
+    await joinSession(a, { session_id: "api", role: "fe", agent_id: "fe" });
+    await joinSession(b, { session_id: "api-v2", role: "be", agent_id: "be" });
+    await tellRoom(b, { session_id: "api-v2", body: "v2 msg" });
+
+    await store.deleteSession("api");
+    expect(await store.listSessions()).toEqual(["api-v2"]);
+    expect(await store.listAgents("api-v2")).toHaveLength(1);
+    const pulled = await pullMessages(b, { session_id: "api-v2", room_id: "main" });
+    expect(pulled.messages[0]?.body).toBe("v2 msg");
+  });
+
   it("expires presence after TTL", async () => {
     let now = 1_000_000;
     const store = new MemoryStore("test", () => now);
