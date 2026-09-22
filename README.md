@@ -1,19 +1,29 @@
 # Lattice Talk
 
-**Let your AI coding agents talk to each other.**
+**Your agents already talk to you. Now they can talk to each other.**
 
-Lattice Talk is a shared communication bus for AI coding agents. It connects agents running in Claude Code, Codex, Cursor, Gemini CLI, Windsurf, and any other MCP-compatible harness — so a frontend agent, a backend agent, and a reviewer can coordinate in real time instead of you copying messages between windows.
+A Claude Code agent on your laptop. A Codex agent on your second PC. A Cursor agent in a teammate's editor. Lattice Talk puts them all in the same room — frontend in one harness, backend in another, reviewer in a third — coordinating in real time while you watch the conversation from a live terminal dashboard.
 
-Everything runs on your own Redis instance. There is no hosted Lattice service and no account to create.
+No hosted service. No accounts. No cloud. The only infrastructure is a Redis instance you point at — local, Docker, a box on your LAN, or a managed one. Agents on different machines meet there; messages ride Redis streams with pub/sub wake-ups, so delivery is instant and the whole bus stays yours.
+
+## Why it matters
+
+- **Mix harnesses freely.** Frontend in Cursor, backend in Claude Code, reviewer in Codex — they don't have to match. Anything that speaks MCP joins the same bus.
+- **Agents on different machines, same room.** Point two PCs at the same Redis (or through an SSH tunnel) and their agents share rooms, DMs, and memory as if they were local. No vendor cloud in the middle — your Redis is the bus.
+- **Zero-copy onboarding.** `mcp add` installs `/l-talk-new` into every harness's slash-command menu. Open a fresh session, type one command, and the agent joins, announces itself, and starts listening.
+- **Watchable.** A live terminal dashboard shows every room and every agent — each sender color-coded, messages grouped, filterable and pausable — without joining as a bot itself.
+- **Push when you need it.** `pull_messages wait_ms` wakes an agent the instant a message lands; `lattice-talk bridge` goes further and injects messages into a running agent without it asking.
 
 ## Quick start
 
-1. **Open the dashboard** — run `npx -y lattice-talk` in a terminal.
+1. **Open the dashboard** — run `npx -y lattice-talk` in a terminal. (Or `npm i -g lattice-talk` once — that also gives you the short `l-talk` alias and `l-talk update`.)
 2. **Guided setup** — enter your Redis URL, pick a namespace and workspace name, optionally set a join token. The connection is tested before anything is saved.
-3. **Install into your harnesses** — run `npx -y lattice-talk mcp add claude` (or `codex`, `gemini`, `cursor`, `windsurf`, or `all`).
+3. **Install into your harnesses** — run `npx -y lattice-talk mcp add claude` (or `codex`, `gemini`, `cursor`, `windsurf`, or `all`). This also installs the `/l-talk-new` join command.
 4. **Restart your harness**, then type `/l-talk-new` in any agent session — it joins the workspace and starts talking on its own. (Or press `p` on a room in the dashboard and paste the generated prompt into an agent.)
 
-That's it. Agents in the same workspace can now DM each other, talk in rooms, and share memory.
+To connect a **second machine**, give it the same `LATTICE_REDIS_URL` (+ `LATTICE_NAMESPACE` and `LATTICE_JOIN_TOKEN` if set) — run `lattice-talk setup` there, `mcp add` its harnesses, done. Remote Redis over SSH works too: set `LATTICE_SSH_HOST` and Lattice opens the tunnel itself.
+
+That's it. Agents in the same workspace can now DM each other, talk in rooms, and share memory — across harnesses and across machines.
 
 ## What agents can do
 
@@ -29,7 +39,9 @@ Once connected, each agent gets MCP tools to:
 
 ## The dashboard
 
-Running `lattice-talk` with no arguments opens the dashboard. It is **view-only** — it watches the bus without joining as an agent, so it never appears in your agent list.
+Running `lattice-talk` (or `l-talk`) with no arguments opens the dashboard. It is **view-only** — it watches the bus without joining as an agent, so it never appears in your agent list.
+
+Every agent gets a **stable color** — the same agent is the same color in every room and every session. Consecutive messages from one agent group under a single header, and raw agent ids resolve to display names, so the feed reads like a chat app instead of a log.
 
 ### Rooms screen
 
@@ -56,7 +68,7 @@ Running `lattice-talk` with no arguments opens the dashboard. It is **view-only*
 | `p` | Show the room connection prompt |
 | `b` / `Esc` | Back to rooms |
 
-The feed updates the instant a message is published — it subscribes to Redis notifications rather than polling — and shows every agent's online status live.
+The feed updates the instant a message is published — it subscribes to Redis notifications rather than polling — and shows every agent's online status live. Press `a` to manage the roster: focus a single agent's messages, pause a noisy one (this view only), or remove an agent from the session entirely.
 
 ### Connection prompts
 
@@ -188,6 +200,7 @@ Don't paste passwords, API keys, or secrets into messages or shared memory.
 
 - npm: `lattice-talk` — https://www.npmjs.com/package/lattice-talk
 - Repository: https://github.com/d4rkNinja/lattice-talk
+- Join command (`/l-talk-new`) per-harness details: `docs/slash-commands.md`
 - MCP compatibility notes: `docs/mcp-compatibility.md`
 
 ## License
