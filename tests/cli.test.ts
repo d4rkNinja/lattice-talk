@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,6 +22,13 @@ import {
 } from "../src/cli/harnesses.js";
 import { agentJoinPrompt } from "../src/cli/prompt.js";
 import { compareVersions, selfInstaller } from "../src/cli/update.js";
+import {
+  commandInvoke,
+  installJoinCommands,
+  joinCommandInstalled,
+  refreshJoinCommands,
+  removeJoinCommands,
+} from "../src/cli/commands.js";
 import { MemoryStore } from "../src/core/memory-store.js";
 import { tellRoom } from "../src/core/messages.js";
 import { createRoom, joinRoom } from "../src/core/rooms.js";
@@ -230,6 +237,90 @@ describe("agent join prompt", () => {
     expect(p).toContain('"main"');
     expect(p).toContain("join_room");
     expect(p).not.toMatch(/<[a-z -]+>/i);
+  });
+});
+
+describe("join commands (/l-talk-new)", () => {
+  const prompt = agentJoinPrompt({ workspace: "ws-1", roomId: "main" });
+
+  it("claude gets a frontmatter markdown command", () => {
+    const home = tmpHome();
+    const claude = findHarness("claude")!;
+    const written = installJoinCommands(claude, prompt, home);
+    expect(written).toEqual([join(home, ".claude", "commands", "l-talk-new.md")]);
+    const text = readFileSync(written[0]!, "utf8");
+    expect(text).toContain("description:");
+    expect(text).toContain('session_id "ws-1"');
+    expect(text).toContain("join_room");
+    expect(commandInvoke(claude)).toBe("/l-talk-new");
+    expect(joinCommandInstalled(claude, home)).toBe(true);
+    removeJoinCommands(claude, home);
+    expect(joinCommandInstalled(claude, home)).toBe(false);
+  });
+
+  it("codex covers prompts (old) and both skill roots (new)", () => {
+    const home = tmpHome();
+    const codex = findHarness("codex")!;
+    const written = installJoinCommands(codex, prompt, home);
+    expect(written).toEqual([
+      join(home, ".codex", "prompts", "l-talk-new.md"),
+      join(home, ".codex", "skills", "l-talk-new", "SKILL.md"),
+      join(home, ".agents", "skills", "l-talk-new", "SKILL.md"),
+    ]);
+    const skillText = readFileSync(written[1]!, "utf8");
+    expect(skillText).toContain("name: l-talk-new");
+    expect(skillText).toContain('session_id "ws-1"');
+    removeJoinCommands(codex, home);
+    // Skill directories are removed wholesale, not just the file.
+    expect(existsSync(join(home, ".codex", "skills", "l-talk-new"))).toBe(false);
+    expect(existsSync(join(home, ".agents", "skills", "l-talk-new"))).toBe(false);
+  });
+
+  it("gemini writes a TOML command with the prompt body", () => {
+    const home = tmpHome();
+    const gemini = findHarness("gemini")!;
+    const [path] = installJoinCommands(gemini, prompt, home);
+    expect(path).toBe(join(home, ".gemini", "commands", "l-talk-new.toml"));
+    const text = readFileSync(path!, "utf8");
+    expect(text).toContain("description =");
+    expect(text).toContain("prompt =");
+    expect(text).toContain('session_id "ws-1"');
+  });
+
+  it("cursor writes a plain command plus a slash-only skill", () => {
+    const home = tmpHome();
+    const cursor = findHarness("cursor")!;
+    const written = installJoinCommands(cursor, prompt, home);
+    expect(written).toHaveLength(2);
+    expect(readFileSync(written[0]!, "utf8")).toContain('session_id "ws-1"');
+    const skillText = readFileSync(written[1]!, "utf8");
+    expect(skillText).toContain("disable-model-invocation: true");
+  });
+
+  it("windsurf writes a global workflow", () => {
+    const home = tmpHome();
+    const windsurf = findHarness("windsurf")!;
+    const [path] = installJoinCommands(windsurf, prompt, home);
+    expect(path).toBe(
+      join(home, ".codeium", "windsurf", "global_workflows", "l-talk-new.md"),
+    );
+    expect(commandInvoke(windsurf)).toBe("/l-talk-new");
+  });
+
+  it("refreshJoinCommands rewrites only already-installed files", () => {
+    const home = tmpHome();
+    const claude = findHarness("claude")!;
+    installJoinCommands(claude, prompt, home);
+    const updated = refreshJoinCommands(
+      agentJoinPrompt({ workspace: "ws-2", roomId: "main" }),
+      home,
+    );
+    expect(updated).toHaveLength(1);
+    expect(readFileSync(updated[0]!, "utf8")).toContain('"ws-2"');
+    // Harnesses without an installed command get nothing.
+    const codex = findHarness("codex")!;
+    expect(joinCommandInstalled(codex, home)).toBe(false);
+    expect(existsSync(join(home, ".codex", "prompts", "l-talk-new.md"))).toBe(false);
   });
 });
 

@@ -9,6 +9,14 @@ import {
   resolveConnection,
 } from "./cli/config-file.js";
 import {
+  commandInvoke,
+  installJoinCommands,
+  joinCommandInstalled,
+  JOIN_COMMAND_NAME,
+  JOIN_COMMAND_ROOM,
+  removeJoinCommands,
+} from "./cli/commands.js";
+import {
   HARNESSES,
   installHarness,
   isInstalled,
@@ -16,6 +24,8 @@ import {
   removeHarness,
   resolveHarnesses,
 } from "./cli/harnesses.js";
+import { agentJoinPrompt } from "./cli/prompt.js";
+import { DEFAULT_ROOM } from "./core/limits.js";
 import { updateCommand } from "./cli/update.js";
 import { runBridge } from "./bridge/runner.js";
 import { BRIDGE_HARNESSES } from "./bridge/driver.js";
@@ -37,6 +47,9 @@ Usage:
   lattice-talk mcp list        Show harness install status
   lattice-talk mcp add <h>...  Install into harnesses (claude codex gemini cursor windsurf | all)
   lattice-talk mcp remove <h>… Remove from harnesses
+  lattice-talk commands list   Show /l-talk-new command status per harness
+  lattice-talk commands add    Install the /l-talk-new join command
+  lattice-talk commands remove Remove the join command
   lattice-talk bridge <h>      Spawn an agent programmatically and push bus
                               messages into it (claude | codex | gemini | cursor)
                               Options: --workspace --room --agent-id --cwd
@@ -170,6 +183,9 @@ async function mcpCommand(rest: string[]): Promise<number> {
     for (const spec of specs) {
       const res = removeHarness(spec);
       out(res.action === "absent" ? `  ${spec.id}: nothing to remove` : `  ${spec.id}: removed (${res.path})`);
+      for (const p of removeJoinCommands(spec)) {
+        out(`  ${spec.id}: removed ${commandInvoke(spec)} → ${p}`);
+      }
     }
     return 0;
   }
@@ -184,6 +200,7 @@ async function mcpCommand(rest: string[]): Promise<number> {
   }
   const env = connectionToHarnessEnv(conn);
   const entry = mcpEntry(env);
+  const prompt = joinPromptFor(conn);
   let failures = 0;
   for (const spec of specs) {
     try {
@@ -193,12 +210,90 @@ async function mcpCommand(rest: string[]): Promise<number> {
       failures += 1;
       err(`  ${spec.id}: failed — ${e instanceof Error ? e.message : e}`);
     }
+    // The join command is best-effort: a harness lacking a commands dir
+    // convention still gets the MCP server.
+    try {
+      for (const p of installJoinCommands(spec, prompt)) {
+        out(`  ${spec.id}: ${commandInvoke(spec)} → ${p}`);
+      }
+    } catch (e) {
+      err(`  ${spec.id}: join command not written — ${e instanceof Error ? e.message : e}`);
+    }
   }
   if (failures > 0) {
     err(`\n${failures} harness installation${failures === 1 ? "" : "s"} failed.`);
     return 1;
   }
   out("\nRestart the harness to pick up the `lattice` MCP server.");
+  out(`Then type ${commandInvoke(specs[0]!)} in a session to join the bus.`);
+  return 0;
+}
+
+/** The join prompt baked into installed slash-commands (saved conn values). */
+function joinPromptFor(conn: { workspace?: string; joinToken?: string }): string {
+  return agentJoinPrompt({
+    workspace: conn.workspace ?? "main",
+    roomId: JOIN_COMMAND_ROOM,
+    tokenProtected: Boolean(conn.joinToken),
+  });
+}
+
+function printCommandsStatus(): void {
+  out(`/${JOIN_COMMAND_NAME} — join-command status per harness\n`);
+  for (const h of HARNESSES) {
+    const installed = joinCommandInstalled(h);
+    out(`  ${h.id.padEnd(9)} ${installed ? "installed" : "not installed"}  ${commandInvoke(h)}`);
+  }
+  out(`\nInstall: lattice-talk commands add <harness|all>`);
+}
+
+async function commandsCommand(rest: string[]): Promise<number> {
+  const sub = rest[0];
+  if (!sub || sub === "list" || sub === "ls") {
+    printCommandsStatus();
+    return 0;
+  }
+  if (sub !== "add" && sub !== "remove" && sub !== "rm") {
+    err(`Unknown commands subcommand: ${sub}`);
+    printHelp();
+    return 1;
+  }
+  const ids = rest.slice(1);
+  if (ids.length === 0) {
+    err(`commands ${sub} needs at least one harness name (or "all").`);
+    return 1;
+  }
+  const { specs, unknown } = resolveHarnesses(ids);
+  if (unknown.length > 0) {
+    err(`Unknown harness(es): ${unknown.join(", ")}. Known: ${HARNESSES.map((h) => h.id).join(", ")}, all.`);
+    return 1;
+  }
+
+  if (sub === "remove" || sub === "rm") {
+    for (const spec of specs) {
+      const removed = removeJoinCommands(spec);
+      out(
+        removed.length === 0
+          ? `  ${spec.id}: nothing to remove`
+          : `  ${spec.id}: removed ${removed.join(", ")}`,
+      );
+    }
+    return 0;
+  }
+
+  const { config } = loadFileConfig();
+  const conn = resolveConnection(config);
+  const prompt = joinPromptFor(conn);
+  for (const spec of specs) {
+    try {
+      for (const p of installJoinCommands(spec, prompt)) {
+        out(`  ${spec.id}: ${commandInvoke(spec)} → ${p}`);
+      }
+    } catch (e) {
+      err(`  ${spec.id}: failed — ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  out(`\nOpen a session in the harness and type /${JOIN_COMMAND_NAME} — the agent joins the workspace and room #${DEFAULT_ROOM} itself.`);
   return 0;
 }
 
@@ -277,6 +372,9 @@ export async function main(argv: string[]): Promise<number> {
       return updateCommand(out, err);
     case "mcp":
       return mcpCommand(rest);
+    case "commands":
+    case "command":
+      return commandsCommand(rest);
     case "bridge":
       return bridgeCommand(rest);
     case "help":

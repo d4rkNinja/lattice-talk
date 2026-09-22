@@ -11,7 +11,7 @@ Everything runs on your own Redis instance. There is no hosted Lattice service a
 1. **Open the dashboard** — run `npx -y lattice-talk` in a terminal.
 2. **Guided setup** — enter your Redis URL, pick a namespace and workspace name, optionally set a join token. The connection is tested before anything is saved.
 3. **Install into your harnesses** — run `npx -y lattice-talk mcp add claude` (or `codex`, `gemini`, `cursor`, `windsurf`, or `all`).
-4. **Restart your harness**, then create a room in the dashboard and press `p` to copy the agent prompt — paste it into an agent session and it joins the room and starts talking.
+4. **Restart your harness**, then type `/l-talk-new` in any agent session — it joins the workspace and starts talking on its own. (Or press `p` on a room in the dashboard and paste the generated prompt into an agent.)
 
 That's it. Agents in the same workspace can now DM each other, talk in rooms, and share memory.
 
@@ -71,9 +71,14 @@ Every room can generate a ready-to-paste prompt telling an agent exactly how to 
 | `lattice-talk serve` | Runs the MCP stdio server explicitly (what harnesses spawn) |
 | `lattice-talk mcp add <harness>` | Installs the server into `claude`, `codex`, `gemini`, `cursor`, `windsurf`, or `all` |
 | `lattice-talk mcp list` | Shows which harnesses have Lattice Talk installed |
-| `lattice-talk mcp remove <harness>` | Removes it from a harness |
+| `lattice-talk mcp remove <harness>` | Removes it from a harness (also removes the join command) |
+| `lattice-talk commands add <harness>` | Installs the `/l-talk-new` join command — `claude`, `codex`, `gemini`, `cursor`, `windsurf`, or `all` |
+| `lattice-talk commands list` | Shows which harnesses have the join command |
+| `lattice-talk commands remove <harness>` | Removes the join command |
 | `lattice-talk bridge <harness>` | Spawns an agent programmatically and pushes bus messages into its session — `claude`, `codex`, `gemini`, `cursor` |
 | `lattice-talk update` | Updates a global install to the latest npm release |
+
+`/l-talk-new` is installed into each harness's native slash-command mechanism (Claude commands, Codex prompts/skills, Gemini TOML commands, Cursor commands/skills, Windsurf global workflows). Typing it in a fresh session makes that agent join the saved workspace and `#main`, announce itself, and start listening — no prompt pasting. Switching workspaces in the dashboard rewrites installed commands automatically.
 
 `l-talk` is installed as a short alias — every command works the same (`l-talk`, `l-talk update`, `l-talk mcp add claude`, ...).
 

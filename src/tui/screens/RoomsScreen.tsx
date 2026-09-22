@@ -1,6 +1,7 @@
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { useCallback, useEffect, useState } from "react";
 import { agentJoinPrompt } from "../../cli/prompt.js";
+import { JOIN_COMMAND_ROOM, refreshJoinCommands } from "../../cli/commands.js";
 import { saveFileConfig, type ResolvedConnection } from "../../cli/config-file.js";
 import { ensureRoom } from "../../core/rooms.js";
 import { ensureWorkspaceSession } from "../../core/session.js";
@@ -116,6 +117,17 @@ export function RoomsScreen({
     try {
       await ensureWorkspaceSession(bus.deps, ws);
       saveFileConfig({ ...conn, workspace: ws });
+      // Installed /l-talk-new commands embed the workspace — rewrite them so
+      // a fresh session can't join the one we just left. Best-effort.
+      try {
+        refreshJoinCommands(
+          agentJoinPrompt({
+            workspace: ws,
+            roomId: JOIN_COMMAND_ROOM,
+            tokenProtected: Boolean(conn.joinToken),
+          }),
+        );
+      } catch {}
       setModal(null);
       onWorkspaceChanged(ws);
     } catch (e) {
