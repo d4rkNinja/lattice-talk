@@ -51,6 +51,8 @@ Running `lattice-talk` with no arguments opens the dashboard. It is **view-only*
 | `←` `→` | Switch between rooms |
 | `↑` `↓` | Scroll the message feed |
 | `f` | Follow the newest messages |
+| `a` | Agents — focus one agent's messages, pause (hide) one, or remove it from the session |
+| `x` | Clear all feed filters |
 | `p` | Show the room connection prompt |
 | `b` / `Esc` | Back to rooms |
 
@@ -71,6 +73,9 @@ Every room can generate a ready-to-paste prompt telling an agent exactly how to 
 | `lattice-talk mcp list` | Shows which harnesses have Lattice Talk installed |
 | `lattice-talk mcp remove <harness>` | Removes it from a harness |
 | `lattice-talk bridge <harness>` | Spawns an agent programmatically and pushes bus messages into its session — `claude`, `codex`, `gemini`, `cursor` |
+| `lattice-talk update` | Updates a global install to the latest npm release |
+
+`l-talk` is installed as a short alias — every command works the same (`l-talk`, `l-talk update`, `l-talk mcp add claude`, ...).
 
 The installer **merges** into each harness's existing MCP config — your other servers and settings are preserved. It also reuses credentials already set in your environment or saved config, so you don't re-enter Redis details per harness. On Windows it correctly uses `npx.cmd`; on macOS/Linux, `npx`.
 

@@ -21,6 +21,7 @@ import {
   resolveHarnesses,
 } from "../src/cli/harnesses.js";
 import { agentJoinPrompt } from "../src/cli/prompt.js";
+import { compareVersions, selfInstaller } from "../src/cli/update.js";
 import { MemoryStore } from "../src/core/memory-store.js";
 import { tellRoom } from "../src/core/messages.js";
 import { createRoom, joinRoom } from "../src/core/rooms.js";
@@ -229,6 +230,26 @@ describe("agent join prompt", () => {
     expect(p).toContain('"main"');
     expect(p).toContain("join_room");
     expect(p).not.toMatch(/<[a-z -]+>/i);
+  });
+});
+
+describe("self-update helpers", () => {
+  it("compareVersions orders numeric releases", () => {
+    expect(compareVersions("0.1.10", "0.1.9")).toBeGreaterThan(0);
+    expect(compareVersions("0.1.10", "0.2.0")).toBeLessThan(0);
+    expect(compareVersions("0.1.10", "0.1.10")).toBe(0);
+    expect(compareVersions("1.0.0", "0.9.9")).toBeGreaterThan(0);
+  });
+
+  it("compareVersions treats prereleases as older than the same release", () => {
+    expect(compareVersions("0.2.0-beta.1", "0.2.0")).toBeLessThan(0);
+    expect(compareVersions("0.2.0", "0.2.0-beta.1")).toBeGreaterThan(0);
+  });
+
+  it("selfInstaller targets the package's latest tag", () => {
+    const { cmd, args } = selfInstaller("some-pkg");
+    expect(args.join(" ")).toContain("some-pkg@latest");
+    expect(cmd.length).toBeGreaterThan(0);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   removeHarness,
   resolveHarnesses,
 } from "./cli/harnesses.js";
+import { updateCommand } from "./cli/update.js";
 import { runBridge } from "./bridge/runner.js";
 import { BRIDGE_HARNESSES } from "./bridge/driver.js";
 import { startServer } from "./mcp/server.js";
@@ -32,6 +33,7 @@ Usage:
   lattice-talk serve           Run the MCP stdio server (used by harnesses)
   lattice-talk setup           Guided setup: Redis URL, namespace, workspace, token
   lattice-talk add             Alias for setup
+  lattice-talk update          Update to the latest release
   lattice-talk mcp list        Show harness install status
   lattice-talk mcp add <h>...  Install into harnesses (claude codex gemini cursor windsurf | all)
   lattice-talk mcp remove <h>… Remove from harnesses
@@ -40,6 +42,9 @@ Usage:
                               Options: --workspace --room --agent-id --cwd
   lattice-talk --version       Print version
   lattice-talk --help          This help
+
+\`l-talk\` is installed as a short alias — every command works the same
+(\`l-talk\`, \`l-talk update\`, \`l-talk mcp add claude\`, ...).
 
 The TUI and setup screens need Bun (bun.sh) or Node >= 26.4 — the MCP server
 itself runs on plain Node >= 20.`;
@@ -267,6 +272,9 @@ export async function main(argv: string[]): Promise<number> {
     case "add":
     case "config":
       return runTui(["--setup"]);
+    case "update":
+    case "upgrade":
+      return updateCommand(out, err);
     case "mcp":
       return mcpCommand(rest);
     case "bridge":
