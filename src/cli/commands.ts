@@ -19,6 +19,8 @@ import { HARNESSES, type HarnessSpec } from "./harnesses.js";
  *  - cursor   → ~/.cursor/commands/<name>.md (legacy commands)
  *             → ~/.cursor/skills/<name>/SKILL.md (current skills)
  *  - windsurf → ~/.codeium/windsurf/global_workflows/<name>.md → /l-talk-new
+ *  - grok     → ~/.grok/skills/<name>/SKILL.md (user-invocable skill)
+ *             → ~/.agents/commands/<name>.md (shared commands dir Grok scans)
  *
  * The file body is the ready-to-paste join prompt generated from the saved
  * connection — workspace and room are baked in at install time.
@@ -103,6 +105,20 @@ export function commandTargets(spec: HarnessSpec, home: string): CommandTarget[]
           join(home, ".codeium", "windsurf", "global_workflows", `${name}.md`),
         ),
       ];
+    case "grok": {
+      // GROK_HOME relocates Grok's whole home (config, skills, sessions).
+      const grokHome = process.env.GROK_HOME || join(home, ".grok");
+      return [
+        // A user-invocable skill shows up as /l-talk-new; the flag keeps it
+        // user-triggered only (no automatic model invocation).
+        skill(
+          join(grokHome, "skills", name, "SKILL.md"),
+          "user-invocable: true\ndisable-model-invocation: true\n",
+        ),
+        // Grok also scans the shared ~/.agents/commands dir.
+        mdCommand(join(home, ".agents", "commands", `${name}.md`)),
+      ];
+    }
     default:
       return [];
   }

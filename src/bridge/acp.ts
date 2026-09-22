@@ -29,9 +29,17 @@ export const ACP_SPECS: Record<string, AcpSpec> = {
     args: ["acp"],
     installHint: "requires `agent` (Cursor CLI) installed and logged in",
   },
+  grok: {
+    // Flags belong between `agent` and `stdio` — `stdio` takes none of them.
+    command: "grok",
+    args: ["agent", "--always-approve", "stdio"],
+    installHint:
+      "requires `grok` (Grok Build) installed and signed in (xAI account or XAI_API_KEY)",
+  },
 };
 
 const ACP_PROTOCOL_VERSION = 1;
+const RESUME_PROBE_MS = 15_000;
 
 export class AcpDriver implements HarnessDriver {
   readonly id: string;
@@ -133,11 +141,17 @@ export class AcpDriver implements HarnessDriver {
     if (opts.resumeRef) {
       for (const method of ["session/resume", "session/load"] as const) {
         try {
-          await rpc.request(method, {
-            sessionId: opts.resumeRef,
-            cwd: opts.cwd,
-            mcpServers,
-          });
+          // Bounded probe — an agent that swallows unknown methods instead
+          // of answering -32601 must not stall the respawn forever.
+          await rpc.request(
+            method,
+            {
+              sessionId: opts.resumeRef,
+              cwd: opts.cwd,
+              mcpServers,
+            },
+            RESUME_PROBE_MS,
+          );
           return opts.resumeRef;
         } catch {
           // capability absent or session gone — try the next mechanism

@@ -82,10 +82,16 @@ export class CodexDriver implements HarnessDriver {
   private async openThread(rpc: NdjsonRpc, opts: DriverOpts): Promise<string> {
     if (opts.resumeRef) {
       try {
-        await rpc.request("thread/resume", {
-          threadId: opts.resumeRef,
-          cwd: opts.cwd,
-        });
+        // Bounded probe — an app-server that swallows unknown methods must
+        // not stall the respawn forever.
+        await rpc.request(
+          "thread/resume",
+          {
+            threadId: opts.resumeRef,
+            cwd: opts.cwd,
+          },
+          15_000,
+        );
         return opts.resumeRef;
       } catch {
         opts.onEvent?.(

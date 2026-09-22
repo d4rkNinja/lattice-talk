@@ -72,10 +72,18 @@ rl.on("line", (line) => {
       );
     }
     reply({ stopReason: "end_turn" });
+  } else if (method === "session/load") {
+    note(`session/load sessionId=${params.sessionId}`);
+    if (process.env.FAKE_LOAD_OK === "1") {
+      reply({});
+      return;
+    }
+    fail(-32601, "session loading not supported");
   } else if (method === "session/cancel") {
     note("cancelled");
     reply({});
   } else {
+    note(`${method} sessionId=${params.sessionId ?? ""}`);
     fail(-32601, "unknown " + method);
   }
 });

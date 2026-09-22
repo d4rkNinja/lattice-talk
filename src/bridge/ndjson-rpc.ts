@@ -120,15 +120,42 @@ export class NdjsonRpc {
     }
   }
 
-  async request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+  async request<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<T> {
     const id = this.nextId++;
+    let timer: NodeJS.Timeout | undefined;
     const promise = new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
-        resolve: (v) => resolve(v as T),
-        reject,
+        resolve: (v) => {
+          if (timer) clearTimeout(timer);
+          resolve(v as T);
+        },
+        reject: (e) => {
+          if (timer) clearTimeout(timer);
+          reject(e);
+        },
       });
+      if (timeoutMs !== undefined) {
+        // A harness that silently drops an unknown method must not wedge the
+        // caller forever — only used on bounded probes, never on prompts.
+        timer = setTimeout(() => {
+          if (this.pending.delete(id)) {
+            reject(new Error(`${method} timed out after ${timeoutMs}ms`));
+          }
+        }, timeoutMs);
+        timer.unref?.();
+      }
     });
-    this.write({ jsonrpc: "2.0", id, method, params: params ?? {} });
+    try {
+      this.write({ jsonrpc: "2.0", id, method, params: params ?? {} });
+    } catch (e) {
+      this.pending.delete(id);
+      if (timer) clearTimeout(timer);
+      throw e;
+    }
     return promise;
   }
 

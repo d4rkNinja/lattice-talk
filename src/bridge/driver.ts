@@ -49,7 +49,7 @@ export interface AcpMcpServer {
   env: { name: string; value: string }[];
 }
 
-export const BRIDGE_HARNESSES = ["claude", "codex", "gemini", "cursor"] as const;
+export const BRIDGE_HARNESSES = ["claude", "codex", "gemini", "cursor", "grok"] as const;
 export type BridgeHarness = (typeof BRIDGE_HARNESSES)[number];
 
 export function isBridgeHarness(id: string): id is BridgeHarness {

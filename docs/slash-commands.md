@@ -22,10 +22,12 @@ different place, so install writes whatever that harness reads:
 | Gemini CLI | `~/.gemini/commands/l-talk-new.toml` | `/l-talk-new` (run `/commands reload` to pick it up without restarting) |
 | Cursor | `~/.cursor/commands/l-talk-new.md` (legacy commands) <br> `~/.cursor/skills/l-talk-new/SKILL.md` (current skills, `disable-model-invocation: true` keeps it human-triggered) | `/l-talk-new` |
 | Windsurf | `~/.codeium/windsurf/global_workflows/l-talk-new.md` | `/l-talk-new` in Cascade |
+| Grok Build | `~/.grok/skills/l-talk-new/SKILL.md` (`user-invocable` + `disable-model-invocation`) <br> `~/.agents/commands/l-talk-new.md` (shared dir Grok scans) | `/l-talk-new` |
 
-Codex and Cursor get multiple files because their mechanism changed across
-versions — writing all of them means the command works on whichever generation
-you have installed.
+Codex, Cursor, and Grok get multiple files because their mechanism changed
+across versions or they scan several roots — writing all of them means the
+command works on whichever generation you have installed. Grok's native skill
+root honors `$GROK_HOME`.
 
 ## Managing it
 

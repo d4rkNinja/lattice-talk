@@ -56,7 +56,7 @@ Usage:
   lattice-talk add             Alias for setup
   lattice-talk update          Update to the latest release
   lattice-talk mcp list        Show harness install status
-  lattice-talk mcp add <h>...  Install into harnesses (claude codex gemini cursor windsurf | all)
+  lattice-talk mcp add <h>...  Install into harnesses (claude codex gemini cursor windsurf grok | all)
   lattice-talk mcp remove <h>… Remove from harnesses
   lattice-talk commands list   Show /l-talk-new command status per harness
   lattice-talk commands add    Install the /l-talk-new join command
@@ -73,7 +73,7 @@ Usage:
     connections show <name>          Print one profile (secrets masked)
     connections remove <name>        Delete a profile
   lattice-talk bridge <h>      Spawn an agent programmatically and push bus
-                              messages into it (claude | codex | gemini | cursor)
+                              messages into it (claude | codex | gemini | cursor | grok)
                               Options: --workspace --room --agent-id --cwd --keep
   lattice-talk watch <h>       Bridge that never dies — stays subscribed when
                               the agent exits and respawns it (resuming its

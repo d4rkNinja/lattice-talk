@@ -212,6 +212,23 @@ describe("harness installers", () => {
     expect(after).not.toContain("mcp_servers.lattice");
     expect(after).toContain("[mcp_servers.other]");
   });
+
+  it("installs grok into ~/.grok/config.toml with the same TOML shape", () => {
+    const home = tmpHome();
+    const grok = findHarness("grok")!;
+    const path = grok.configPath(home);
+    expect(path).toBe(join(home, ".grok", "config.toml"));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '[models]\ndefault = "grok-build"\n');
+    installHarness(grok, mcpEntry({ LATTICE_REDIS_URL: "redis://h/0" }), home);
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain('[models]');
+    expect(text).toContain("[mcp_servers.lattice]");
+    expect(text).toContain('LATTICE_REDIS_URL = "redis://h/0"');
+    expect(isInstalled(grok, home)).toBe(true);
+    removeHarness(grok, home);
+    expect(readFileSync(path, "utf8")).not.toContain("mcp_servers.lattice");
+  });
 });
 
 describe("agent join prompt", () => {
@@ -295,6 +312,25 @@ describe("join commands (/l-talk-new)", () => {
     expect(readFileSync(written[0]!, "utf8")).toContain('session_id "ws-1"');
     const skillText = readFileSync(written[1]!, "utf8");
     expect(skillText).toContain("disable-model-invocation: true");
+  });
+
+  it("grok writes a user-invocable skill plus the shared commands dir", () => {
+    const home = tmpHome();
+    const grok = findHarness("grok")!;
+    const written = installJoinCommands(grok, prompt, home);
+    expect(written).toEqual([
+      join(home, ".grok", "skills", "l-talk-new", "SKILL.md"),
+      join(home, ".agents", "commands", "l-talk-new.md"),
+    ]);
+    const skillText = readFileSync(written[0]!, "utf8");
+    expect(skillText).toContain("name: l-talk-new");
+    expect(skillText).toContain("user-invocable: true");
+    expect(skillText).toContain("disable-model-invocation: true");
+    expect(skillText).toContain('session_id "ws-1"');
+    expect(commandInvoke(grok)).toBe("/l-talk-new");
+    removeJoinCommands(grok, home);
+    expect(existsSync(join(home, ".grok", "skills", "l-talk-new"))).toBe(false);
+    expect(existsSync(join(home, ".agents", "commands", "l-talk-new.md"))).toBe(false);
   });
 
   it("windsurf writes a global workflow", () => {

@@ -30,7 +30,7 @@ export function agentJoinPrompt(opts: {
   }
   lines.push(
     "",
-    "If `lattice-talk` tools are not available in this harness, tell me which harness you are (claude | codex | gemini | cursor | windsurf) and I will run `lattice-talk mcp add` for you.",
+    "If `lattice-talk` tools are not available in this harness, tell me which harness you are (claude | codex | gemini | cursor | windsurf | grok) and I will run `lattice-talk mcp add` for you.",
   );
   return lines.join("\n");
 }

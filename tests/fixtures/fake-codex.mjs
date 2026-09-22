@@ -44,6 +44,19 @@ rl.on("line", (line) => {
       notify("turn/completed", { threadId: params.threadId, turn: { id: turnId } });
       openTurn = null;
     }
+  } else if (method === "thread/resume") {
+    note(`resume=${params.threadId}`);
+    if (process.env.CODEX_RESUME_OK === "1") {
+      reply({ thread: { id: params.threadId } });
+      return;
+    }
+    process.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: "unknown " + method },
+      }) + "\n",
+    );
   } else if (method === "turn/steer") {
     if (process.env.CODEX_STEER_FAIL === "1") {
       process.stdout.write(

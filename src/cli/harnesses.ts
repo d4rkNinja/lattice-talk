@@ -17,7 +17,8 @@ export interface McpServerEntry {
 export interface HarnessSpec {
   id: string;
   label: string;
-  kind: "json" | "codex-toml";
+  /** "toml" = Grok/Codex-style `[mcp_servers.*]` config.toml; "json" = mcpServers map. */
+  kind: "json" | "toml";
   configPath(home: string): string;
 }
 
@@ -31,8 +32,17 @@ export const HARNESSES: HarnessSpec[] = [
   {
     id: "codex",
     label: "Codex",
-    kind: "codex-toml",
+    kind: "toml",
     configPath: (home) => join(home, ".codex", "config.toml"),
+  },
+  {
+    id: "grok",
+    label: "Grok Build",
+    kind: "toml",
+    // Grok reads $GROK_HOME/config.toml, defaulting to ~/.grok/config.toml —
+    // same [mcp_servers.*] TOML shape Codex uses.
+    configPath: (home) =>
+      join(process.env.GROK_HOME || join(home, ".grok"), "config.toml"),
   },
   {
     id: "gemini",
@@ -119,17 +129,18 @@ function installJson(path: string, entry: McpServerEntry, remove: boolean): void
   writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`);
 }
 
-const CODEX_LATTICE_SECTION = /^\[mcp_servers\.lattice(\.[^\]]*)?\]\s*$/;
+const LATTICE_TOML_SECTION = /^\[mcp_servers\.lattice(\.[^\]]*)?\]\s*$/;
 const TOML_SECTION = /^\[/;
 
-function installCodexToml(path: string, entry: McpServerEntry, remove: boolean): void {
+/** Shared by Codex (~/.codex/config.toml) and Grok (~/.grok/config.toml). */
+function installToml(path: string, entry: McpServerEntry, remove: boolean): void {
   const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
   const lines = existing.split("\n");
   const kept: string[] = [];
   let skipping = false;
   for (const line of lines) {
     if (TOML_SECTION.test(line.trim())) {
-      skipping = CODEX_LATTICE_SECTION.test(line.trim());
+      skipping = LATTICE_TOML_SECTION.test(line.trim());
     }
     if (!skipping) kept.push(line);
   }
@@ -171,7 +182,7 @@ export function isInstalled(spec: HarnessSpec, home = homedir()): boolean {
     }
     return readFileSync(path, "utf8")
       .split("\n")
-      .some((l) => CODEX_LATTICE_SECTION.test(l.trim()));
+      .some((l) => LATTICE_TOML_SECTION.test(l.trim()));
   } catch {
     return false;
   }
@@ -185,7 +196,7 @@ export function installHarness(
   const path = spec.configPath(home);
   const existed = isInstalled(spec, home);
   if (spec.kind === "json") installJson(path, entry, false);
-  else installCodexToml(path, entry, false);
+  else installToml(path, entry, false);
   return { harness: spec, path, action: existed ? "updated" : "installed" };
 }
 
@@ -194,6 +205,6 @@ export function removeHarness(spec: HarnessSpec, home = homedir()): InstallResul
   // Leave files that don't mention lattice untouched.
   if (!isInstalled(spec, home)) return { harness: spec, path, action: "absent" };
   if (spec.kind === "json") installJson(path, mcpEntry({}), true);
-  else installCodexToml(path, mcpEntry({}), true);
+  else installToml(path, mcpEntry({}), true);
   return { harness: spec, path, action: "removed" };
 }

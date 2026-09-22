@@ -128,6 +128,52 @@ describe("ACP driver (gemini/cursor/claude-adapter protocol)", () => {
     expect(readLog(log)).toContain('"optionId":"allow-1"');
   });
 
+  it("resumes a prior session via session/load when the agent supports it", async () => {
+    const log = logPath();
+    const driver = new AcpDriver(
+      "grok",
+      { command: NODE, args: [join(FIXTURES, "fake-acp.mjs")], installHint: "fake" },
+      false,
+    );
+    await driver.start({
+      cwd: process.cwd(),
+      env: { FAKE_LOG: log, FAKE_LOAD_OK: "1" },
+      mcpServers: [],
+      initialPrompt: "rejoin the bus",
+      resumeRef: "old-session-42",
+    });
+    expect(driver.sessionRef).toBe("old-session-42");
+    await driver.close();
+    const text = readLog(log);
+    expect(text).toContain("session/load sessionId=old-session-42");
+    expect(text).toContain("prompt=rejoin the bus");
+  });
+
+  it("falls back to session/new when resume is unsupported", async () => {
+    const log = logPath();
+    const events: string[] = [];
+    const driver = new AcpDriver(
+      "claude",
+      { command: NODE, args: [join(FIXTURES, "fake-acp.mjs")], installHint: "fake" },
+      false,
+    );
+    await driver.start({
+      cwd: process.cwd(),
+      env: { FAKE_LOG: log },
+      mcpServers: [],
+      initialPrompt: "rejoin",
+      resumeRef: "dead-session",
+      onEvent: (l) => events.push(l),
+    });
+    expect(driver.sessionRef).toBe("sess-1"); // fresh session id
+    await driver.close();
+    const text = readLog(log);
+    expect(text).toContain("session/resume sessionId=dead-session");
+    expect(text).toContain("session/load sessionId=dead-session");
+    expect(text).toContain("session.new");
+    expect(events.some((l) => l.includes("could not resume"))).toBe(true);
+  });
+
   it("fails session setup with a friendly error naming the install hint", async () => {
     const driver = new AcpDriver(
       "gemini",
@@ -169,6 +215,35 @@ describe("Codex app-server driver", () => {
     expect(text).toContain('"name":"lattice-talk-bridge"');
     expect(text).toContain("turn=join the bus");
     expect(text).toContain("steer=second message");
+  });
+
+  it("resumes a persisted thread on respawn, falling back to thread/start", async () => {
+    const log = logPath();
+    const driver = new CodexDriver(NODE, [join(FIXTURES, "fake-codex.mjs")], false);
+    await driver.start({
+      cwd: process.cwd(),
+      env: { FAKE_LOG: log, CODEX_RESUME_OK: "1" },
+      mcpServers: [],
+      initialPrompt: "rejoin the bus",
+      resumeRef: "t-dead",
+    });
+    expect(driver.sessionRef).toBe("t-dead");
+    expect(readLog(log)).toContain("resume=t-dead");
+    await driver.close();
+
+    // Older app-server without thread/resume → fresh thread, still works.
+    const log2 = logPath();
+    const fallback = new CodexDriver(NODE, [join(FIXTURES, "fake-codex.mjs")], false);
+    await fallback.start({
+      cwd: process.cwd(),
+      env: { FAKE_LOG: log2 },
+      mcpServers: [],
+      initialPrompt: "rejoin",
+      resumeRef: "t-dead",
+    });
+    expect(fallback.sessionRef).toBe("t-1");
+    expect(readLog(log2)).toContain("resume=t-dead");
+    await fallback.close();
   });
 
   it("falls back to turn/start when steer reports no in-flight turn", async () => {
@@ -331,6 +406,7 @@ describe("runBridge pump", () => {
       harness: "claude",
       conn: { namespace: "test", workspace: "w1" },
       roomId: "main",
+      cwd: process.cwd(),
       persistent: true,
       driverFactory: () => {
         const d = new FakeDriver(`sess-${drivers.length + 1}`);
@@ -389,6 +465,7 @@ describe("runBridge pump", () => {
       conn: { namespace: "test", workspace: "w1" },
       roomId: "main",
       agentId: "bot",
+      cwd: process.cwd(),
       persistent: true,
       driverFactory: () => {
         const d = new FakeDriver();
@@ -478,6 +555,7 @@ describe("bridge plumbing", () => {
     expect(createDriver("gemini")).toBeInstanceOf(AcpDriver);
     expect(createDriver("cursor")).toBeInstanceOf(AcpDriver);
     expect(createDriver("claude")).toBeInstanceOf(AcpDriver);
+    expect(createDriver("grok")).toBeInstanceOf(AcpDriver);
     expect(createDriver("codex")).toBeInstanceOf(CodexDriver);
   });
 

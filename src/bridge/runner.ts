@@ -14,6 +14,7 @@ import { mcpEntry } from "../cli/harnesses.js";
 import { AcpDriver, ACP_SPECS } from "./acp.js";
 import { CodexDriver } from "./codex.js";
 import {
+  BRIDGE_HARNESSES,
   isBridgeHarness,
   type AcpMcpServer,
   type HarnessDriver,
@@ -52,6 +53,8 @@ const SWEEP_MS = 15_000;
 const DISCOVERY_TIMEOUT_MS = 120_000;
 const RESPAWN_MIN_MS = 2_000;
 const RESPAWN_MAX_MS = 60_000;
+/** Bound on a respawn's start+handshake — a hung spawn must fail into backoff, not stall the supervisor. */
+const RESPAWN_SPAWN_MS = 120_000;
 const PAGE = 100;
 
 export function createDriver(harness: string): HarnessDriver {
@@ -91,7 +94,7 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
     throw new Error(
       opts.harness === "windsurf"
         ? "Windsurf has no supported programmatic session API — its Cascade interface is IDE-internal. Use `lattice-talk mcp add windsurf` instead; agents still get push wake-ups via pull_messages wait_ms."
-        : `Unknown harness "${opts.harness}". Bridgeable: claude, codex, gemini, cursor.`,
+        : `Unknown harness "${opts.harness}". Bridgeable: ${BRIDGE_HARNESSES.join(", ")}.`,
     );
   }
   if (!opts.conn.workspace) {
@@ -190,7 +193,7 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
         ? opts.driver
         : (opts.driverFactory?.() ?? createDriver(opts.harness));
     firstSpawn = false;
-    await d.start({
+    const started = d.start({
       cwd: opts.cwd,
       env,
       mcpServers: [latticeMcpSpec(env)],
@@ -205,6 +208,24 @@ export async function runBridge(opts: BridgeOptions): Promise<void> {
       onEvent: log,
       onExit: (code) => onDriverExit(d, code),
     });
+    if (resume) {
+      // Respawns happen inside the supervisor where a wedged handshake is
+      // invisible — bound it so failure lands in the backoff path.
+      const timeout = new Promise<never>((_, reject) => {
+        const t = setTimeout(
+          () => reject(new Error(`respawn timed out after ${RESPAWN_SPAWN_MS / 1000}s`)),
+          RESPAWN_SPAWN_MS,
+        );
+        t.unref?.();
+        started.finally(() => clearTimeout(t));
+      });
+      await Promise.race([started, timeout]).catch(async (e) => {
+        await d.close().catch(() => {});
+        throw e;
+      });
+    } else {
+      await started;
+    }
     driver = d;
     spawnFailures = 0;
     sessionRef = d.sessionRef ?? sessionRef;
