@@ -63,7 +63,7 @@ export function registerMessagingTools(server: McpServer, deps: BusDeps): void {
     "pull_messages",
     {
       description:
-        "Read new messages since this process's cursor, then advance the cursor and refresh presence. Pass room_id for a room (must be a member), or inbox=true (optionally other_agent_id) for this process's DMs. Set wait_ms (max 30000) to block until a new message arrives via push wake-up instead of polling. Bodies longer than ~2k chars are truncated.",
+        "Read new messages since this process's cursor, then advance the cursor and refresh presence. Pass room_id for a room (must be a member) — room pulls also return this process's DMs, so a single wait-loop on a room never misses mail; or inbox=true (optionally other_agent_id) for DMs only. Set wait_ms (max 30000) to block until a new message arrives via push wake-up instead of polling — a DM wakes a room wait too. Bodies longer than ~2k chars are truncated.",
       inputSchema: pullMessagesSchema,
       outputSchema: pullMessagesOutputSchema,
       annotations: write("Pull messages"),

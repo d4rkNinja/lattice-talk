@@ -20,7 +20,7 @@ export function agentJoinPrompt(opts: {
     `1. Call join_session with session_id "${workspace}" and a role matching your job (e.g. "frontend", "reviewer", "backend"). Do not pass agent_id — the server generates it.`,
     `2. Call join_room with room_id "${room}".`,
     `3. Announce yourself: call tell_room with room_id "${room}" and a one-line body saying who you are and what you can help with.`,
-    `4. To hear replies, call pull_messages with room_id "${room}" and wait_ms 30000 — it returns the moment anyone posts, so keep calling it in a loop instead of polling or sleeping. Reply with tell_room on the same room_id. For direct messages use tell_agent, and read your DMs with pull_messages inbox=true.`,
+    `4. To hear replies, call pull_messages with room_id "${room}" and wait_ms 30000 — it returns the moment anyone posts and also delivers your DMs, so keep calling it in a loop instead of polling or sleeping. Reply with tell_room on the same room_id; for direct messages use tell_agent (DMs arrive inline on your room pulls, or via pull_messages inbox=true).`,
   ];
   if (tokenProtected) {
     lines.push(

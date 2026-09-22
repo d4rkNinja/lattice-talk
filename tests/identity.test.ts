@@ -78,6 +78,38 @@ describe("process-owned identity", () => {
     expect(pulled.messages[0]?.from).toBe("fe");
     expect(pulled.messages[0]?.role).toBe("fe");
   });
+
+  it("a DM wakes a blocked room pull and arrives inline", async () => {
+    const store = new MemoryStore("dm-wake");
+    const a = makeDeps(store);
+    const b = makeDeps(store);
+    await joinSession(a, { session_id: "s1", role: "fe", agent_id: "fe" });
+    await joinSession(b, { session_id: "s1", role: "be", agent_id: "be" });
+
+    // b blocks on the room with wait_ms — a DM must interrupt that wait,
+    // not sit unread until the timeout or turn end.
+    const pending = pullMessages(b, { room_id: "main", wait_ms: 5000 });
+    await new Promise((r) => setTimeout(r, 50)); // let the subscribe settle
+    await tellAgent(a, { to_agent_id: "be", body: "ping be" });
+    const res = await pending;
+    expect(res.messages.some((m) => m.to === "be" && m.body === "ping be")).toBe(true);
+  });
+
+  it("a plain room pull also drains unread DMs", async () => {
+    const store = new MemoryStore("dm-inline");
+    const a = makeDeps(store);
+    const b = makeDeps(store);
+    await joinSession(a, { session_id: "s1", role: "fe", agent_id: "fe" });
+    await joinSession(b, { session_id: "s1", role: "be", agent_id: "be" });
+
+    await tellAgent(a, { to_agent_id: "be", body: "dm for be" });
+    await tellRoom(a, { body: "room msg" });
+    const res = await pullMessages(b, { room_id: "main" });
+    expect(res.messages.map((m) => m.body).sort()).toEqual(["dm for be", "room msg"]);
+    // DM cursor advanced too — a follow-up inbox pull returns nothing.
+    const inbox = await pullMessages(b, { inbox: true });
+    expect(inbox.messages).toHaveLength(0);
+  });
 });
 
 describe("room membership", () => {

@@ -262,9 +262,14 @@ export async function pullMessages(
   }
 
   const roomId = assertId(input.room_id?.trim() || DEFAULT_ROOM, "room_id");
-  const channels = [keys.notifyRoom(deps.config.namespace, sessionId, roomId)];
+  // A room pull also watches this agent's DM channel and drains the inbox:
+  // a DM must interrupt a room wait, never sit unread behind one.
+  const channels = [
+    keys.notifyRoom(deps.config.namespace, sessionId, roomId),
+    keys.notifyDm(deps.config.namespace, sessionId, agentId),
+  ];
   return pullWithWait(deps, waitMs, channels, () =>
-    pullRoomStream(deps, sessionId, agentId, roomId, limit),
+    pullRoomAndInbox(deps, sessionId, agentId, roomId, limit),
   opts);
 }
 
@@ -326,6 +331,36 @@ async function pullRoomStream(
     messages,
     next_cursor,
     truncated,
+  };
+}
+
+/**
+ * Room pull that also drains the agent's DM inbox. DMs carry a `to` field so
+ * callers can distinguish them; when only DMs arrived the channel reports
+ * "inbox". Ordering merges by timestamp — stream ids are per-stream and not
+ * globally comparable.
+ */
+async function pullRoomAndInbox(
+  deps: BusDeps,
+  sessionId: string,
+  agentId: string,
+  roomId: string,
+  limit: number,
+): Promise<PullResult> {
+  const room = await pullRoomStream(deps, sessionId, agentId, roomId, limit);
+  const inbox = await pullInbox(deps, sessionId, agentId, undefined, limit);
+  if (inbox.messages.length === 0 && !inbox.truncated) return room;
+  const messages = [...room.messages, ...inbox.messages].sort((a, b) => {
+    const byTs = a.ts.localeCompare(b.ts);
+    return byTs !== 0 ? byTs : compareStreamIds(a.id, b.id);
+  });
+  return {
+    session_id: sessionId,
+    channel: room.messages.length > 0 ? room.channel : "inbox",
+    messages,
+    next_cursor: room.next_cursor,
+    cursors: inbox.cursors,
+    truncated: room.truncated || inbox.truncated,
   };
 }
 
