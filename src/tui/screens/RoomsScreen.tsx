@@ -2,7 +2,20 @@ import { useKeyboard, useRenderer } from "@opentui/react";
 import { useCallback, useEffect, useState } from "react";
 import { agentJoinPrompt } from "../../cli/prompt.js";
 import { JOIN_COMMAND_ROOM, refreshJoinCommands } from "../../cli/commands.js";
-import { saveFileConfig, type ResolvedConnection } from "../../cli/config-file.js";
+import {
+  activateProfile,
+  applyConnectionToHarnesses,
+  deleteProfile,
+  describeConnection,
+  listProfiles,
+  saveProfile,
+} from "../../cli/connections.js";
+import {
+  loadFileConfig,
+  saveFileConfig,
+  type ResolvedConnection,
+} from "../../cli/config-file.js";
+import { pingBus } from "../bus.js";
 import { ensureRoom } from "../../core/rooms.js";
 import { ensureWorkspaceSession } from "../../core/session.js";
 import {
@@ -14,6 +27,7 @@ import {
 } from "../bus.js";
 import {
   ConfirmModal,
+  ConnectionsModal,
   FadeIn,
   Footer,
   Header,
@@ -29,19 +43,26 @@ type ModalState =
   | { type: "delete"; room: RoomInfo }
   | { type: "prompt"; roomId?: string }
   | { type: "workspace" }
-  | { type: "new-workspace" };
+  | { type: "new-workspace" }
+  | { type: "connections" }
+  | { type: "new-connection" }
+  | { type: "delete-connection"; name: string };
 
 export function RoomsScreen({
   bus,
   conn,
   onOpenRoom,
   onWorkspaceChanged,
+  onConnectionChanged,
+  onNewConnection,
   onSetup,
 }: {
   bus: BusHandle;
   conn: ResolvedConnection;
   onOpenRoom(roomId: string): void;
   onWorkspaceChanged(workspace: string): void;
+  onConnectionChanged(conn: ResolvedConnection): void;
+  onNewConnection(name: string): void;
   onSetup(): void;
 }) {
   const renderer = useRenderer();
@@ -116,7 +137,14 @@ export function RoomsScreen({
   const switchWorkspace = async (ws: string) => {
     try {
       await ensureWorkspaceSession(bus.deps, ws);
-      saveFileConfig({ ...conn, workspace: ws });
+      // Keep the active profile in sync so it doesn't point at a stale
+      // workspace next time it's selected.
+      const { config } = loadFileConfig();
+      if (config.active && config.profiles?.[config.active]) {
+        saveProfile(config.active, { ...conn, workspace: ws }, { activate: true });
+      } else {
+        saveFileConfig({ ...conn, workspace: ws });
+      }
       // Installed /l-talk-new commands embed the workspace — rewrite them so
       // a fresh session can't join the one we just left. Best-effort.
       try {
@@ -134,6 +162,44 @@ export function RoomsScreen({
       setError(e instanceof Error ? e.message : String(e));
       setModal(null);
     }
+  };
+
+  const [connBusy, setConnBusy] = useState(false);
+  const profiles =
+    modal?.type === "connections"
+      ? listProfiles(loadFileConfig().config).map((p) => ({
+          name: p.name,
+          active: p.active,
+          summary: describeConnection(p.conn),
+        }))
+      : [];
+
+  const switchConnection = async (name: string) => {
+    if (connBusy) return;
+    setConnBusy(true);
+    try {
+      const { config } = loadFileConfig();
+      const profile = config.profiles?.[name];
+      if (!profile) throw new Error(`profile ${JSON.stringify(name)} not found`);
+      const next = { namespace: "dev", ...profile };
+      await pingBus(next);
+      activateProfile(name);
+      try {
+        applyConnectionToHarnesses(next, () => {}, () => {});
+      } catch {}
+      setModal(null);
+      onConnectionChanged(next);
+    } catch (e) {
+      setConnBusy(false);
+      setModal(null);
+      setError(`could not switch to "${name}": ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const deleteConnection = (name: string) => {
+    const result = deleteProfile(name);
+    setModal(null);
+    if (result.conn) onConnectionChanged(result.conn);
   };
 
   const clamped = Math.min(selected, Math.max(0, rooms.length - 1));
@@ -164,6 +230,9 @@ export function RoomsScreen({
         break;
       case "w":
         setModal({ type: "workspace" });
+        break;
+      case "c":
+        setModal({ type: "connections" });
         break;
       case "s":
         onSetup();
@@ -264,6 +333,7 @@ export function RoomsScreen({
         <Key k="d" label="delete" />
         <Key k="p" label="prompt" />
         <Key k="w" label="workspace" />
+        <Key k="c" label="connections" />
         <Key k="s" label="setup" />
         <Key k="q" label="quit" />
       </Footer>
@@ -318,6 +388,45 @@ export function RoomsScreen({
           hint="Creates a session agents will join with join_session."
           onSubmit={(v) => (v.trim() ? void switchWorkspace(v.trim()) : setModal(null))}
           onCancel={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal?.type === "connections" ? (
+        <ConnectionsModal
+          rows={profiles}
+          busy={connBusy}
+          onUse={(name) => void switchConnection(name)}
+          onDelete={(name) => setModal({ type: "delete-connection", name })}
+          onNew={() => setModal({ type: "new-connection" })}
+          onClose={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal?.type === "new-connection" ? (
+        <InputModal
+          title="New connection"
+          placeholder="profile name, e.g. personal or office"
+          hint="Letters, digits, . _ - only. Guided setup runs next — including SSH tunnel options."
+          onSubmit={(v) => {
+            const name = v.trim();
+            if (!name) {
+              setModal(null);
+              return;
+            }
+            setModal(null);
+            onNewConnection(name);
+          }}
+          onCancel={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal?.type === "delete-connection" ? (
+        <ConfirmModal
+          title={`Delete "${modal.name}"?`}
+          body="Removes this saved connection. If it was active, the next profile becomes active and the dashboard reconnects."
+          confirmLabel="delete"
+          onConfirm={() => deleteConnection(modal.name)}
+          onCancel={() => setModal({ type: "connections" })}
         />
       ) : null}
     </box>

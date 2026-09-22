@@ -6,35 +6,81 @@ import { dirname, join } from "node:path";
  * User-level Lattice config, written by `lattice-talk setup` (the guided TUI)
  * and read by the TUI, `mcp add`, and `serve`. Environment variables always
  * win over file values.
+ *
+ * The file can hold several named connection profiles ("personal", "office",
+ * …). The flat fields always mirror the *active* profile, so consumers that
+ * predate profiles — and env-var overrides — keep working unchanged. See
+ * cli/connections.ts for the profile operations.
  */
-export interface FileConfig {
+export interface ConnectionProfile {
   redisUrl?: string;
   namespace?: string;
   /** Session id the TUI treats as the workspace (rooms live inside it). */
   workspace?: string;
   joinToken?: string;
-  /** Optional SSH bastion for reaching Redis — advanced, env/config only. */
+  /** Optional SSH bastion for reaching Redis. */
   sshHost?: string;
   sshPort?: string;
   sshUser?: string;
   sshKey?: string;
+  sshLocalPort?: string;
 }
 
-export interface ResolvedConnection {
-  redisUrl?: string;
-  namespace: string;
-  workspace?: string;
-  joinToken?: string;
-  sshHost?: string;
-  sshPort?: string;
-  sshUser?: string;
-  sshKey?: string;
+export interface FileConfig extends ConnectionProfile {
+  /** Name of the profile the flat fields currently mirror. */
+  active?: string;
+  profiles?: Record<string, ConnectionProfile>;
 }
+
+export interface ResolvedConnection extends ConnectionProfile {
+  namespace: string;
+}
+
+const FLAT_KEYS = [
+  "redisUrl",
+  "namespace",
+  "workspace",
+  "joinToken",
+  "sshHost",
+  "sshPort",
+  "sshUser",
+  "sshKey",
+  "sshLocalPort",
+] as const;
 
 export function configFilePath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
   const override = env.LATTICE_CONFIG_PATH?.trim();
   if (override) return override;
   return join(home, ".lattice", "config.json");
+}
+
+function cleanProfile(raw: unknown): ConnectionProfile | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const rec = raw as Record<string, unknown>;
+  const out: ConnectionProfile = {};
+  let any = false;
+  for (const key of FLAT_KEYS) {
+    const value = rec[key];
+    if (typeof value === "string" && value.trim()) {
+      (out as Record<string, string>)[key] = value.trim();
+      any = true;
+    }
+  }
+  return any ? out : undefined;
+}
+
+/** Raw config object — preserves keys this version doesn't know about. */
+function readRawConfig(path: string): { raw: Record<string, unknown>; corrupt: boolean } {
+  if (!existsSync(path)) return { raw: {}, corrupt: false };
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { raw: {}, corrupt: true };
+    }
+    return { raw: parsed as Record<string, unknown>, corrupt: false };
+  } catch {
+    return { raw: {}, corrupt: true };
+  }
 }
 
 export function loadFileConfig(
@@ -45,44 +91,51 @@ export function loadFileConfig(
   if (!existsSync(path)) {
     return { path, config: {}, exists: false, corrupt: false };
   }
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { path, config: {}, exists: true, corrupt: true };
+  const { raw, corrupt } = readRawConfig(path);
+  if (corrupt) return { path, config: {}, exists: true, corrupt: true };
+
+  const config: FileConfig = { ...(cleanProfile(raw) ?? {}) };
+  if (typeof raw.active === "string" && raw.active.trim()) config.active = raw.active.trim();
+  if (raw.profiles && typeof raw.profiles === "object" && !Array.isArray(raw.profiles)) {
+    const profiles: Record<string, ConnectionProfile> = {};
+    for (const [name, p] of Object.entries(raw.profiles as Record<string, unknown>)) {
+      const clean = cleanProfile(p);
+      if (clean) profiles[name] = clean;
     }
-    const raw = parsed as Record<string, unknown>;
-    const config: FileConfig = {};
-    if (typeof raw.redisUrl === "string" && raw.redisUrl.trim()) config.redisUrl = raw.redisUrl.trim();
-    if (typeof raw.namespace === "string" && raw.namespace.trim()) config.namespace = raw.namespace.trim();
-    if (typeof raw.workspace === "string" && raw.workspace.trim()) config.workspace = raw.workspace.trim();
-    if (typeof raw.joinToken === "string" && raw.joinToken.trim()) config.joinToken = raw.joinToken.trim();
-    if (typeof raw.sshHost === "string" && raw.sshHost.trim()) config.sshHost = raw.sshHost.trim();
-    if (typeof raw.sshPort === "string" && raw.sshPort.trim()) config.sshPort = raw.sshPort.trim();
-    if (typeof raw.sshUser === "string" && raw.sshUser.trim()) config.sshUser = raw.sshUser.trim();
-    if (typeof raw.sshKey === "string" && raw.sshKey.trim()) config.sshKey = raw.sshKey.trim();
-    return { path, config, exists: true, corrupt: false };
-  } catch {
-    return { path, config: {}, exists: true, corrupt: true };
+    if (Object.keys(profiles).length > 0) config.profiles = profiles;
   }
+  return { path, config, exists: true, corrupt: false };
 }
 
+/**
+ * Save the flat connection fields. `profiles`/`active` and any unknown keys in
+ * the existing file are preserved unless the passed config carries them —
+ * callers that only touch the active connection (setup screen, workspace
+ * switch) must never wipe the saved profile list.
+ */
 export function saveFileConfig(
   config: FileConfig,
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
 ): string {
   const path = configFilePath(env, home);
+  const { raw } = readRawConfig(path);
+  const merged: Record<string, unknown> = { ...raw };
+  for (const key of FLAT_KEYS) {
+    const value = config[key]?.trim();
+    if (value) merged[key] = value;
+    else delete merged[key];
+  }
+  if (config.profiles !== undefined) {
+    if (Object.keys(config.profiles).length > 0) merged.profiles = config.profiles;
+    else delete merged.profiles;
+  }
+  if (config.active !== undefined) {
+    if (config.active?.trim()) merged.active = config.active.trim();
+    else delete merged.active;
+  }
   mkdirSync(dirname(path), { recursive: true });
-  const clean: Record<string, string> = {};
-  if (config.redisUrl?.trim()) clean.redisUrl = config.redisUrl.trim();
-  if (config.namespace?.trim()) clean.namespace = config.namespace.trim();
-  if (config.workspace?.trim()) clean.workspace = config.workspace.trim();
-  if (config.joinToken?.trim()) clean.joinToken = config.joinToken.trim();
-  if (config.sshHost?.trim()) clean.sshHost = config.sshHost.trim();
-  if (config.sshPort?.trim()) clean.sshPort = config.sshPort.trim();
-  if (config.sshUser?.trim()) clean.sshUser = config.sshUser.trim();
-  if (config.sshKey?.trim()) clean.sshKey = config.sshKey.trim();
-  writeFileSync(path, `${JSON.stringify(clean, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(path, `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 });
   return path;
 }
 
@@ -100,6 +153,7 @@ export function resolveConnection(
     sshPort: env.LATTICE_SSH_PORT?.trim() || file.sshPort,
     sshUser: env.LATTICE_SSH_USER?.trim() || file.sshUser,
     sshKey: env.LATTICE_SSH_KEY?.trim() || file.sshKey,
+    sshLocalPort: env.LATTICE_SSH_LOCAL_PORT?.trim() || file.sshLocalPort,
   };
 }
 
@@ -117,6 +171,7 @@ export function connectionToEnv(conn: ResolvedConnection): Record<string, string
   if (conn.sshPort) env.LATTICE_SSH_PORT = conn.sshPort;
   if (conn.sshUser) env.LATTICE_SSH_USER = conn.sshUser;
   if (conn.sshKey) env.LATTICE_SSH_KEY = conn.sshKey;
+  if (conn.sshLocalPort) env.LATTICE_SSH_LOCAL_PORT = conn.sshLocalPort;
   return env;
 }
 
@@ -136,6 +191,7 @@ const HARNESS_ENV_KEYS = [
   "LATTICE_SSH_PORT",
   "LATTICE_SSH_USER",
   "LATTICE_SSH_KEY",
+  "LATTICE_SSH_LOCAL_PORT",
   "LATTICE_PRESENCE_TTL",
   "LATTICE_STREAM_MAXLEN",
   "OTEL_EXPORTER_OTLP_ENDPOINT",

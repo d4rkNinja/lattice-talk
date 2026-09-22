@@ -461,6 +461,143 @@ export function AgentsModal({
   );
 }
 
+export interface ConnectionRow {
+  name: string;
+  active: boolean;
+  /** Credential-masked one-liner, e.g. describeConnection(). */
+  summary: string;
+}
+
+/**
+ * Saved Redis connections ("personal", "office", …). Two steps: pick a
+ * profile, then Connect / Delete. "+ New connection" routes to the guided
+ * setup screen so tunnel details get the full form.
+ */
+export function ConnectionsModal({
+  rows,
+  busy,
+  onUse,
+  onDelete,
+  onNew,
+  onClose,
+}: {
+  rows: ConnectionRow[];
+  busy?: boolean;
+  onUse(name: string): void;
+  onDelete(name: string): void;
+  onNew(): void;
+  onClose(): void;
+}) {
+  const [targetName, setTargetName] = useState<string | null>(null);
+  const target = rows.find((r) => r.name === targetName) ?? null;
+
+  useKeyboard((key) => {
+    if (busy) return;
+    if (key.name !== "escape") return;
+    if (targetName) setTargetName(null);
+    else onClose();
+  });
+
+  if (busy) {
+    return (
+      <Modal title="Connections" width={56}>
+        <Spinner label="connecting" />
+      </Modal>
+    );
+  }
+
+  if (target) {
+    const options = [
+      target.active
+        ? {
+            name: "Reconnect",
+            description: "restart the dashboard on this connection",
+            value: "use",
+          }
+        : {
+            name: "Use this connection",
+            description: "switch the active bus and re-point installed harnesses",
+            value: "use",
+          },
+      {
+        name: "Delete",
+        description: target.active
+          ? "remove this profile (the next one becomes active)"
+          : "remove this saved profile",
+        value: "delete",
+      },
+      { name: "Back", description: "pick a different connection", value: "back" },
+    ];
+    return (
+      <Modal title={`Connection ${glyphs.dash} ${target.name}`} width={64}>
+        <text fg={colors.muted}>{target.summary}</text>
+        <select
+          options={options}
+          focused
+          height={Math.min(8, options.length * 2)}
+          textColor={colors.fg}
+          descriptionColor={colors.muted}
+          selectedBackgroundColor={colors.select}
+          selectedTextColor={colors.accent}
+          onSelect={(_i, opt) => {
+            if (!opt) return;
+            if (opt.value === "use") onUse(target.name);
+            else if (opt.value === "delete") onDelete(target.name);
+            else setTargetName(null);
+          }}
+        />
+        <box flexDirection="row" gap={2}>
+          <Key k={glyphs.enter} label="choose" />
+          <Key k="esc" label="back" />
+        </box>
+      </Modal>
+    );
+  }
+
+  const options = [
+    ...rows.map((r) => ({
+      name: `${r.active ? glyphs.dotOn : glyphs.dotOff} ${r.name}${
+        r.active ? ` ${glyphs.sep} active` : ""
+      }`,
+      description: r.summary,
+      value: r.name,
+    })),
+    {
+      name: "+ New connection",
+      description: "guided setup — Redis URL, workspace, SSH tunnel",
+      value: "__new__",
+    },
+  ];
+  return (
+    <Modal title="Connections" width={64}>
+      {rows.length === 0 ? (
+        <text fg={colors.muted}>
+          No saved profiles — save one and switch between buses (personal,
+          office, SSH-tunneled) without retyping anything.
+        </text>
+      ) : null}
+      <select
+        options={options}
+        focused
+        height={Math.min(14, options.length * 2)}
+        textColor={colors.fg}
+        descriptionColor={colors.muted}
+        selectedBackgroundColor={colors.select}
+        selectedTextColor={colors.accent}
+        onSelect={(_i, opt) => {
+          if (!opt) return;
+          if (opt.value === "__new__") onNew();
+          else setTargetName(String(opt.value));
+        }}
+      />
+      <box flexDirection="row" gap={2}>
+        <Key k={glyphs.enter} label="choose" />
+        <Key k="esc" label="close" />
+      </box>
+    </Modal>
+  );
+}
+
 /** Copyable prompt shown after creating a room / via the `p` key. */
 export function PromptModal({
   text,

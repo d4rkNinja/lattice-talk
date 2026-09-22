@@ -8,7 +8,10 @@ import { VERSION } from "./version.js";
 // Spawned as a child process by `lattice-talk` / `lattice-talk tui|setup`
 // (see src/cli.ts) — OpenTUI's native renderer needs Bun or Node >= 26.4,
 // which is why it never shares a process with the MCP stdio server.
-const forceSetup = process.argv.slice(2).includes("--setup");
+const args = process.argv.slice(2);
+const forceSetup = args.includes("--setup");
+const profileIdx = args.indexOf("--profile");
+const profileName = profileIdx !== -1 ? args[profileIdx + 1]?.trim() || undefined : undefined;
 
 /**
  * Diagnostics: LATTICE_TUI_LOG=/path/to/log captures what the renderer
@@ -69,4 +72,4 @@ renderer.on(CliRenderEvents.CAPABILITIES, (caps: unknown) => dlog("capabilities"
 renderer.on(CliRenderEvents.PALETTE, (palette: unknown) => dlog("palette", palette));
 
 renderer.setTerminalTitle("lattice-talk");
-createRoot(renderer).render(<App forceSetup={forceSetup} />);
+createRoot(renderer).render(<App forceSetup={forceSetup} profileName={profileName} />);

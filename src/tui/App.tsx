@@ -18,11 +18,18 @@ type View =
   | { type: "rooms" }
   | { type: "room"; roomId: string };
 
-export function App({ forceSetup = false }: { forceSetup?: boolean }) {
+export function App({
+  forceSetup = false,
+  profileName,
+}: {
+  forceSetup?: boolean;
+  profileName?: string;
+}) {
   const renderer = useRenderer();
   const [phase, setPhase] = useState<"loading" | "setup" | "ready">("loading");
   const [conn, setConn] = useState<ResolvedConnection>({ namespace: "dev" });
   const [notice, setNotice] = useState<string>();
+  const [setupProfile, setSetupProfile] = useState<string | undefined>(profileName);
   const [view, setView] = useState<View>({ type: "rooms" });
   const [bus, setBus] = useState<BusHandle | null>(null);
   const busRef = useRef<BusHandle | null>(null);
@@ -99,9 +106,11 @@ export function App({ forceSetup = false }: { forceSetup?: boolean }) {
       <SetupScreen
         initial={conn}
         notice={notice}
+        profileName={setupProfile}
         onSaved={(c) => {
           setConn(c);
           setNotice(undefined);
+          setSetupProfile(undefined);
           void openBus(c)
             .then(() => setPhase("ready"))
             .catch((e) => {
@@ -130,6 +139,18 @@ export function App({ forceSetup = false }: { forceSetup?: boolean }) {
         const next = { ...conn, workspace: ws };
         setConn(next);
         setView({ type: "rooms" });
+      }}
+      onConnectionChanged={(c) => {
+        setConn(c);
+        setView({ type: "rooms" });
+        void openBus(c).catch((e) => {
+          setNotice(e instanceof Error ? e.message : String(e));
+          setPhase("setup");
+        });
+      }}
+      onNewConnection={(name) => {
+        setSetupProfile(name);
+        setPhase("setup");
       }}
       onSetup={() => setPhase("setup")}
     />

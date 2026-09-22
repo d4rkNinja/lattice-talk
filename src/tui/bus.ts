@@ -27,6 +27,7 @@ export async function connectBus(conn: ResolvedConnection): Promise<BusHandle> {
   if (conn.sshPort) env.LATTICE_SSH_PORT = conn.sshPort;
   if (conn.sshUser) env.LATTICE_SSH_USER = conn.sshUser;
   if (conn.sshKey) env.LATTICE_SSH_KEY = conn.sshKey;
+  if (conn.sshLocalPort) env.LATTICE_SSH_LOCAL_PORT = conn.sshLocalPort;
   const config = loadConfig(env);
   const store = await createStore(config);
   return {

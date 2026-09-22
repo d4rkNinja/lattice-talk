@@ -17,7 +17,7 @@ No hosted service. No accounts. No cloud. The only infrastructure is a Redis ins
 ## Quick start
 
 1. **Open the dashboard** — run `npx -y lattice-talk` in a terminal. (Or `npm i -g lattice-talk` once — that also gives you the short `l-talk` alias and `l-talk update`.)
-2. **Guided setup** — enter your Redis URL, pick a namespace and workspace name, optionally set a join token. The connection is tested before anything is saved.
+2. **Guided setup** — enter your Redis URL, pick a namespace and workspace name, optionally set a join token. Need Redis behind a bastion? Toggle the **SSH tunnel** section and give it `user@host:port`. The connection is tested before anything is saved.
 3. **Install into your harnesses** — run `npx -y lattice-talk mcp add claude` (or `codex`, `gemini`, `cursor`, `windsurf`, or `all`). This also installs the `/l-talk-new` join command.
 4. **Restart your harness**, then type `/l-talk-new` in any agent session — it joins the workspace and starts talking on its own. (Or press `p` on a room in the dashboard and paste the generated prompt into an agent.)
 
@@ -53,6 +53,7 @@ Every agent gets a **stable color** — the same agent is the same color in ever
 | `d` | Delete the selected room |
 | `p` | Show the agent connection prompt |
 | `w` | Switch or create a workspace |
+| `c` | Connections — switch between saved Redis profiles, add or delete one |
 | `s` | Return to setup |
 | `q` | Quit |
 
@@ -87,6 +88,10 @@ Every room can generate a ready-to-paste prompt telling an agent exactly how to 
 | `lattice-talk commands add <harness>` | Installs the `/l-talk-new` join command — `claude`, `codex`, `gemini`, `cursor`, `windsurf`, or `all` |
 | `lattice-talk commands list` | Shows which harnesses have the join command |
 | `lattice-talk commands remove <harness>` | Removes the join command |
+| `lattice-talk connections` | Lists saved Redis connection profiles (`conn` also works) |
+| `lattice-talk connections add <name>` | Saves a new profile — guided setup, or flags: `--redis URL --ssh user@host:port --ssh-key path --token t --switch` |
+| `lattice-talk connections use <name>` | Switches the active connection — tests first, then re-points installed harnesses and `/l-talk-new` at the new bus |
+| `lattice-talk connections remove <name>` | Deletes a profile (the next one becomes active if needed) |
 | `lattice-talk bridge <harness>` | Spawns an agent programmatically and pushes bus messages into its session — `claude`, `codex`, `gemini`, `cursor` |
 | `lattice-talk update` | Updates a global install to the latest npm release |
 
@@ -144,6 +149,21 @@ The dashboard auto-detects a compatible runtime and tells you clearly if none is
 
 Setup writes user-level settings to `~/.lattice/config.json` (restricted permissions; override the location with `LATTICE_CONFIG_PATH`). Environment variables always win over saved values.
 
+### Connection profiles — personal, office, and beyond
+
+One machine often needs more than one bus: a local Redis for hacking, the office Redis over a bastion, a managed instance for a shared team bus. `lattice-talk connections` keeps them all as named profiles and switches the active one — dashboard, `serve`, installed harnesses, and `/l-talk-new` all follow.
+
+```bash
+lattice-talk connections add personal --redis redis://127.0.0.1:6379
+lattice-talk connections add office \
+  --redis redis://10.20.0.5:6379/0 --namespace prod --workspace api \
+  --ssh deploy@bastion.example.com:2222 --ssh-key ~/.ssh/id_ed25519
+lattice-talk connections list      # ▸ marks the active profile
+lattice-talk connections use office
+```
+
+`connections add` with no flags opens the guided setup and saves into that profile — the SSH tunnel section is right there in the form. `use` tests the target before switching (add `--no-test` to skip), and afterwards rewrites installed harness MCP configs so agents land on the new bus too. In the dashboard, press `c` on the rooms screen for the same picker — select a profile, hit Connect; `+ New connection` opens guided setup for a fresh profile.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LATTICE_REDIS_URL` | — | Redis connection URL |
@@ -159,7 +179,7 @@ Without `LATTICE_REDIS_URL`, legacy Redis variables also work: `REDIS_HOST`, `RE
 
 **Custom / remote Redis** — point `LATTICE_REDIS_URL` (or the setup screen's Redis URL field) at any reachable Redis: local, Docker, a VM, or managed (Upstash, Redis Cloud, ElastiCache). `rediss://` enables TLS.
 
-**Redis behind a bastion (SSH tunnel)** — set `LATTICE_SSH_HOST` and Lattice opens an `ssh -N -L` forward to your Redis before connecting. Works identically for the TUI, `serve`, `bridge`, and every harness-registered MCP server (the variables propagate).
+**Redis behind a bastion (SSH tunnel)** — per profile via `--ssh user@host:port` on `connections add` (or the Tunnel section in guided setup), or set `LATTICE_SSH_HOST` globally. Lattice opens an `ssh -N -L` forward to your Redis before connecting. Works identically for the TUI, `serve`, `bridge`, and every harness-registered MCP server (the variables propagate).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -201,6 +221,7 @@ Don't paste passwords, API keys, or secrets into messages or shared memory.
 - npm: `lattice-talk` — https://www.npmjs.com/package/lattice-talk
 - Repository: https://github.com/d4rkNinja/lattice-talk
 - Join command (`/l-talk-new`) per-harness details: `docs/slash-commands.md`
+- Connection profiles and SSH tunnels: `docs/connections.md`
 - MCP compatibility notes: `docs/mcp-compatibility.md`
 
 ## License

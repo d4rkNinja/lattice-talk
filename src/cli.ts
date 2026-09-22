@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
+  configFilePath,
   connectionToHarnessEnv,
   envWithFileDefaults,
   loadFileConfig,
@@ -17,6 +18,15 @@ import {
   removeJoinCommands,
 } from "./cli/commands.js";
 import {
+  activateProfile,
+  applyConnectionToHarnesses,
+  connectionFromFlags,
+  deleteProfile,
+  describeConnection,
+  listProfiles,
+  saveProfile,
+} from "./cli/connections.js";
+import {
   HARNESSES,
   installHarness,
   isInstalled,
@@ -25,6 +35,7 @@ import {
   resolveHarnesses,
 } from "./cli/harnesses.js";
 import { agentJoinPrompt } from "./cli/prompt.js";
+import { pingBus } from "./tui/bus.js";
 import { DEFAULT_ROOM } from "./core/limits.js";
 import { updateCommand } from "./cli/update.js";
 import { runBridge } from "./bridge/runner.js";
@@ -50,6 +61,17 @@ Usage:
   lattice-talk commands list   Show /l-talk-new command status per harness
   lattice-talk commands add    Install the /l-talk-new join command
   lattice-talk commands remove Remove the join command
+  lattice-talk connections     Manage saved Redis connections ("personal",
+                              "office", …) incl. SSH-tunneled ones:
+    connections list                 Show profiles + which is active
+    connections add <name>           Guided setup saved as a profile — or
+        --redis URL --namespace ns --workspace ws --token t
+        --ssh [user@]host[:port] --ssh-key path --ssh-local-port n
+        --switch --no-test           non-interactive
+    connections use <name>           Switch the active connection (tests
+        [--no-test]                  first; re-points installed harnesses)
+    connections show <name>          Print one profile (secrets masked)
+    connections remove <name>        Delete a profile
   lattice-talk bridge <h>      Spawn an agent programmatically and push bus
                               messages into it (claude | codex | gemini | cursor)
                               Options: --workspace --room --agent-id --cwd
@@ -297,6 +319,148 @@ async function commandsCommand(rest: string[]): Promise<number> {
   return 0;
 }
 
+function printConnectionsStatus(): void {
+  const { config } = loadFileConfig();
+  const profiles = listProfiles(config);
+  out("lattice-talk connections\n");
+  if (profiles.length === 0) {
+    if (config.redisUrl) {
+      out(`  current (unsaved)  ${describeConnection(config)}`);
+      out("\nSave it as a profile: lattice-talk connections add <name> --switch --no-test");
+      out("(re-enter via `lattice-talk connections add <name>` for full control)");
+    } else {
+      out("  no saved connections yet");
+    }
+    out("\nAdd one: lattice-talk connections add <name>   (guided)");
+    out("     or: lattice-talk connections add office --redis redis://… --ssh deploy@bastion:2222");
+    return;
+  }
+  const nameW = Math.max(...profiles.map((p) => p.name.length), "current".length);
+  for (const p of profiles) {
+    const mark = p.active ? "▸" : " ";
+    out(`  ${mark} ${p.name.padEnd(nameW)}  ${describeConnection(p.conn)}`);
+  }
+  // Flat fields that don't match the active profile (hand-edited file).
+  if (config.redisUrl && config.active && config.profiles?.[config.active]) {
+    const mirror = describeConnection(config);
+    const profile = describeConnection(config.profiles[config.active]!);
+    if (mirror !== profile) out(`\n  note: current connection differs from profile "${config.active}" — ${mirror}`);
+  } else if (config.redisUrl && !config.active) {
+    out(`\n  current (unsaved)  ${describeConnection(config)}`);
+  }
+  out(`\nConfig: ${configFilePath()}`);
+  out("Switch: lattice-talk connections use <name>");
+}
+
+async function connectionsCommand(rest: string[]): Promise<number> {
+  const sub = rest[0];
+  if (!sub || sub === "list" || sub === "ls") {
+    printConnectionsStatus();
+    return 0;
+  }
+  const name = rest[1];
+  if (!name && sub !== "add") {
+    err(`connections ${sub} needs a profile name.`);
+    return 1;
+  }
+
+  if (sub === "show") {
+    const { config } = loadFileConfig();
+    const profile = config.profiles?.[name!];
+    if (!profile) {
+      err(`No connection profile named ${JSON.stringify(name)}.`);
+      return 1;
+    }
+    out(`${name}${name === config.active ? " (active)" : ""}`);
+    out(`  ${describeConnection(profile)}`);
+    if (profile.sshKey) out(`  ssh key: ${profile.sshKey}`);
+    if (profile.sshLocalPort) out(`  ssh local port: ${profile.sshLocalPort}`);
+    return 0;
+  }
+
+  if (sub === "add") {
+    if (!name) {
+      err("connections add needs a profile name, e.g. `lattice-talk connections add office`.");
+      return 1;
+    }
+    const flags = connectionFromFlags(rest.slice(2));
+    if (!flags.conn.redisUrl) {
+      // No --redis: hand off to the guided TUI, which saves into this profile.
+      return runTui(["--setup", "--profile", name]);
+    }
+    const conn = { ...flags.conn, namespace: flags.conn.namespace ?? "dev" };
+    if (!flags.noTest) {
+      out(`testing ${describeConnection(conn)} …`);
+      try {
+        await pingBus(conn);
+      } catch (e) {
+        err(`Could not reach Redis: ${e instanceof Error ? e.message : e}`);
+        err("Nothing saved. Fix the details, or pass --no-test to save anyway.");
+        return 1;
+      }
+    }
+    const { config } = loadFileConfig();
+    const activate =
+      flags.switchProfile || (!config.active && !config.redisUrl);
+    saveProfile(name, conn, { activate });
+    out(`saved profile "${name}"${activate ? " (active)" : ""}`);
+    if (activate) {
+      applyConnectionToHarnesses(conn, out, err);
+    } else {
+      out(`activate it with: lattice-talk connections use ${name}`);
+    }
+    return 0;
+  }
+
+  if (sub === "use" || sub === "switch") {
+    const noTest = rest.slice(2).some((a) => a === "--no-test" || a === "--force");
+    const { config } = loadFileConfig();
+    const profile = config.profiles?.[name!];
+    if (!profile) {
+      const known = Object.keys(config.profiles ?? {}).sort();
+      err(
+        `No connection profile named ${JSON.stringify(name)}` +
+          (known.length ? `. Saved: ${known.join(", ")}` : " — none saved yet."),
+      );
+      return 1;
+    }
+    const conn = { namespace: "dev", ...profile };
+    if (!noTest) {
+      out(`testing ${describeConnection(conn)} …`);
+      try {
+        await pingBus(conn);
+      } catch (e) {
+        err(`Could not reach Redis through "${name}": ${e instanceof Error ? e.message : e}`);
+        err(`Stayed on the current connection. Pass --no-test to switch anyway.`);
+        return 1;
+      }
+    }
+    activateProfile(name!);
+    out(`switched to "${name}" — ${describeConnection(conn)}`);
+    applyConnectionToHarnesses(conn, out, err);
+    out("\nRestart running harness sessions so their MCP servers pick up the new bus.");
+    return 0;
+  }
+
+  if (sub === "remove" || sub === "rm" || sub === "delete") {
+    const result = deleteProfile(name!);
+    if (!result.removed) {
+      err(`No connection profile named ${JSON.stringify(name)}.`);
+      return 1;
+    }
+    out(`removed profile "${name}"`);
+    if (result.activeNow && result.conn) {
+      out(`active connection is now "${result.activeNow}"`);
+      applyConnectionToHarnesses(result.conn, out, err);
+    }
+    return 0;
+  }
+
+  err(`Unknown connections subcommand: ${sub}`);
+  printHelp();
+  return 1;
+}
+
 /** Parse `--flag value` pairs from a bridge command tail. */
 function parseFlags(rest: string[]): { harness?: string; flags: Map<string, string> } {
   let harness: string | undefined;
@@ -375,6 +539,10 @@ export async function main(argv: string[]): Promise<number> {
     case "commands":
     case "command":
       return commandsCommand(rest);
+    case "connections":
+    case "connection":
+    case "conn":
+      return connectionsCommand(rest);
     case "bridge":
       return bridgeCommand(rest);
     case "help":
