@@ -2,6 +2,10 @@
  * Text the user pastes into an agent (Claude Code, Codex, …) so it knows how
  * to join the Lattice workspace and reach a room. Pure string builder — kept
  * free of TUI/Node deps so it is unit-testable.
+ *
+ * Ready-to-paste contract: every value is already filled in. agent_id is
+ * omitted on purpose (the server generates one); the agent picks its own
+ * role. Nothing in the output may require the user to edit it.
  */
 export function agentJoinPrompt(opts: {
   workspace: string;
@@ -9,29 +13,15 @@ export function agentJoinPrompt(opts: {
   tokenProtected?: boolean;
 }): string {
   const { workspace, roomId, tokenProtected } = opts;
+  const room = roomId || "main";
   const lines = [
-    "You have access to the `lattice-talk` MCP server — a shared session bus for AI coding agents.",
+    "You have access to the `lattice-talk` MCP server — a shared bus that lets AI coding agents message each other. Do the steps below now; every value is already filled in, so don't ask me for anything.",
     "",
-    `Join my Lattice workspace "${workspace}"${roomId ? ` and room "${roomId}"` : ""}:`,
-    "",
-    `1. join_session — session_id: "${workspace}", role: "<your role>", agent_id: "<unique-id>"`,
+    `1. Call join_session with session_id "${workspace}" and a role matching your job (e.g. "frontend", "reviewer", "backend"). Do not pass agent_id — the server generates it.`,
+    `2. Call join_room with room_id "${room}".`,
+    `3. Announce yourself: call tell_room with room_id "${room}" and a one-line body saying who you are and what you can help with.`,
+    `4. To hear replies, call pull_messages with room_id "${room}" and wait_ms 30000 — it returns the moment anyone posts, so keep calling it in a loop instead of polling or sleeping. Reply with tell_room on the same room_id. For direct messages use tell_agent, and read your DMs with pull_messages inbox=true.`,
   ];
-  if (roomId) {
-    lines.push(`2. join_room — room_id: "${roomId}"`);
-    lines.push(
-      `3. pull_messages — room_id: "${roomId}" to read new messages; tell_room to post. Use inbox=true for direct messages.`,
-    );
-    lines.push(
-      "   To wait for replies, call pull_messages with wait_ms (e.g. 30000) — it returns the moment a message is published instead of polling in a loop.",
-    );
-  } else {
-    lines.push(
-      "2. pull_messages — reads room \"main\" by default; tell_room to post. Use inbox=true for direct messages.",
-    );
-    lines.push(
-      "   To wait for replies, call pull_messages with wait_ms (e.g. 30000) — it returns the moment a message is published instead of polling in a loop.",
-    );
-  }
   if (tokenProtected) {
     lines.push(
       "",
@@ -40,7 +30,7 @@ export function agentJoinPrompt(opts: {
   }
   lines.push(
     "",
-    "If `lattice-talk` is not in your MCP tools, tell me and I will run: lattice-talk mcp add <your harness> (claude | codex | gemini | cursor | windsurf).",
+    "If `lattice-talk` tools are not available in this harness, tell me which harness you are (claude | codex | gemini | cursor | windsurf) and I will run `lattice-talk mcp add` for you.",
   );
   return lines.join("\n");
 }

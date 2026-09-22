@@ -309,23 +309,32 @@ export function PromptModal({
 }) {
   const renderer = useRenderer();
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   useKeyboard((key) => {
     if (key.name === "escape") onClose();
     if (key.name === "c") {
       const ok = renderer.copyToClipboardOSC52(text);
-      if (ok) setCopied(true);
+      setCopied(ok);
+      setCopyFailed(!ok);
     }
   });
   return (
     <Modal title="Agent join prompt" width={78}>
       <text fg={colors.muted}>
-        Paste this into an agent (Claude Code, Codex{glyphs.dots}) to connect it:
+        Paste this into an agent (Claude Code, Codex{glyphs.dots}) as-is {glyphs.dash}{" "}
+        everything is already filled in:
       </text>
       <box border borderStyle="single" borderColor={colors.border} padding={1}>
         <text selectable fg={colors.fg}>
           {text}
         </text>
       </box>
+      {copyFailed ? (
+        <text fg={colors.warn}>
+          Clipboard not available in this terminal {glyphs.dash} select the text
+          above and copy it manually.
+        </text>
+      ) : null}
       <box flexDirection="row" gap={2}>
         <Key k="c" label={copied ? `copied ${glyphs.ok}` : "copy to clipboard"} />
         <Key k="esc" label="close" />

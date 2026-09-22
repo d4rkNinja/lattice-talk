@@ -219,6 +219,16 @@ describe("agent join prompt", () => {
     expect(p).toContain("join_room");
     expect(p).toContain("LATTICE_JOIN_TOKEN");
     expect(p).not.toContain("redis://");
+    // Ready-to-paste: no <placeholder> tokens the user would have to edit.
+    expect(p).not.toMatch(/<[a-z -]+>/i);
+    expect(p).not.toContain("agent_id:");
+  });
+
+  it("defaults to room main and needs no edits without a room", () => {
+    const p = agentJoinPrompt({ workspace: "alpha" });
+    expect(p).toContain('"main"');
+    expect(p).toContain("join_room");
+    expect(p).not.toMatch(/<[a-z -]+>/i);
   });
 });
 
