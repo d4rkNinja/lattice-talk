@@ -8,11 +8,14 @@ import { agentJoinPrompt } from "../../cli/prompt.js";
 import type { ResolvedConnection } from "../../cli/config-file.js";
 import type { LatticeMessage } from "../../core/types.js";
 import {
+  DM_FEED_ID,
   formatTime,
   listPeersView,
   listRoomsInfo,
+  pollDmMessages,
   pollRoomMessages,
   removePeer,
+  subscribeDmFeed,
   subscribeRoomFeed,
   type BusHandle,
   type PeerView,
@@ -56,15 +59,16 @@ function wrap(body: string, width: number): string[] {
  */
 function MessageGroupView({
   group,
-  name,
+  nameOf,
   width,
   animate,
 }: {
   group: MessageGroup;
-  name: string;
+  nameOf: (id: string) => string;
   width: number;
   animate: boolean;
 }) {
+  const name = nameOf(group.from);
   const color = agentColor(group.from);
   const bodyWidth = Math.max(20, width - 8);
   const inner = (
@@ -86,7 +90,7 @@ function MessageGroupView({
                   <strong>{name}</strong>
                 </span>
                 <span fg={colors.dim}>
-                  {` ${glyphs.sep} ${m.role}${m.harness && m.harness !== "unknown" ? `/${m.harness}` : ""}${m.kind !== "chat" ? ` ${glyphs.sep} ${m.kind}` : ""}`}
+                  {` ${glyphs.sep} ${m.role}${m.harness && m.harness !== "unknown" ? `/${m.harness}` : ""}${m.to ? ` ${glyphs.arrow} ${nameOf(m.to)}` : ""}${m.kind !== "chat" ? ` ${glyphs.sep} ${m.kind}` : ""}`}
                 </span>
               </>
             ) : null}
@@ -137,6 +141,7 @@ export function RoomScreen({
   onOpenRoom(roomId: string): void;
 }) {
   const workspace = conn.workspace ?? "main";
+  const isDms = roomId === DM_FEED_ID;
   const { width: termWidth } = useTerminalDimensions();
   const [messages, setMessages] = useState<LatticeMessage[]>([]);
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
@@ -146,6 +151,9 @@ export function RoomScreen({
   const [focus, setFocus] = useState<string | null>(null);
   const [error, setError] = useState<string>();
   const lastIdRef = useRef("0");
+  // Per-pair read positions for the merged DM view (stream ids aren't
+  // comparable across pair streams).
+  const dmCursorsRef = useRef(new Map<string, string>());
   // Ids in the first loaded page render flat; anything after animates in.
   const initialIdsRef = useRef<Set<string> | null>(null);
   // Same for the peer roster — agents present at first load render flat.
@@ -154,16 +162,20 @@ export function RoomScreen({
 
   const refresh = useCallback(async () => {
     try {
-      const firstLoad = lastIdRef.current === "0";
-      const [page, r, p] = await Promise.all([
-        pollRoomMessages(bus, workspace, roomId, lastIdRef.current),
+      const firstLoad = initialIdsRef.current === null;
+      const [fresh, r, p] = await Promise.all([
+        isDms
+          ? pollDmMessages(bus, workspace, dmCursorsRef.current)
+          : pollRoomMessages(bus, workspace, roomId, lastIdRef.current).then((page) => {
+              if (page.messages.length) lastIdRef.current = page.lastId;
+              return page.messages;
+            }),
         listRoomsInfo(bus, workspace),
         listPeersView(bus, workspace),
       ]);
-      if (page.messages.length) {
-        lastIdRef.current = page.lastId;
-        if (firstLoad) initialIdsRef.current = new Set(page.messages.map((m) => m.id));
-        setMessages((prev) => [...prev, ...page.messages].slice(-500));
+      if (fresh.length) {
+        if (firstLoad) initialIdsRef.current = new Set(fresh.map((m) => m.id));
+        setMessages((prev) => [...prev, ...fresh].slice(-500));
       } else if (firstLoad) {
         initialIdsRef.current = new Set();
       }
@@ -176,10 +188,11 @@ export function RoomScreen({
     } catch {
       // transient bus errors keep the last good frame
     }
-  }, [bus, workspace, roomId]);
+  }, [bus, workspace, roomId, isDms]);
 
   useEffect(() => {
     lastIdRef.current = "0";
+    dmCursorsRef.current.clear();
     initialIdsRef.current = null;
     initialPeersRef.current = null;
     setMessages([]);
@@ -188,7 +201,11 @@ export function RoomScreen({
     // dropped notify or a reconnect.
     let cancelled = false;
     let unsub: (() => Promise<void>) | undefined;
-    subscribeRoomFeed(bus, workspace, roomId, () => void refresh())
+    const wake = () => void refresh();
+    const sub = isDms
+      ? subscribeDmFeed(bus, workspace, wake)
+      : subscribeRoomFeed(bus, workspace, roomId, wake);
+    sub
       .then((u) => {
         if (cancelled) void u();
         else unsub = u;
@@ -255,12 +272,12 @@ export function RoomScreen({
         break;
       case "left":
       case "right": {
-        if (rooms.length < 2) break;
-        const cur = rooms.findIndex((r) => r.id === roomId);
+        if (channelIds.length < 2) break;
+        const cur = channelIds.indexOf(roomId);
         const base = cur === -1 ? 0 : cur;
         const next =
-          (base + (key.name === "left" ? -1 : 1) + rooms.length) % rooms.length;
-        if (rooms[next].id !== roomId) onOpenRoom(rooms[next].id);
+          (base + (key.name === "left" ? -1 : 1) + channelIds.length) % channelIds.length;
+        if (channelIds[next] !== roomId) onOpenRoom(channelIds[next]!);
         break;
       }
       case "f": {
@@ -274,6 +291,10 @@ export function RoomScreen({
   const sidebarW = 30;
   const feedWidth = Math.max(30, termWidth - sidebarW - 8);
   const cur = rooms.find((r) => r.id === roomId);
+  const channelIds = useMemo(
+    () => [...rooms.map((r) => r.id), DM_FEED_ID],
+    [rooms],
+  );
   const peerById = useMemo(
     () => new Map(peers.map((p) => [p.agent_id, p])),
     [peers],
@@ -286,7 +307,7 @@ export function RoomScreen({
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={colors.bg}>
       <Header
-        left={`ns:${conn.namespace}  ws:${workspace}  #${roomId}`}
+        left={`ns:${conn.namespace}  ws:${workspace}  ${isDms ? `${glyphs.mail} dms` : `#${roomId}`}`}
         right={<LiveDot label="live feed (view only)" />}
       />
       <box flexDirection="row" flexGrow={1} padding={1} gap={1}>
@@ -300,7 +321,7 @@ export function RoomScreen({
           border
           borderStyle="rounded"
           borderColor={filtersActive ? colors.warn : colors.borderActive}
-          title={`#${cur?.displayName ?? roomId}`}
+          title={isDms ? `${glyphs.mail} dms ${glyphs.sep} all agent DMs` : `#${cur?.displayName ?? roomId}`}
           titleColor={colors.accent}
           flexGrow={1}
           flexDirection="column"
@@ -333,10 +354,22 @@ export function RoomScreen({
           >
             {messages.length === 0 ? (
               <box padding={1} flexDirection="column" gap={1}>
-                <LiveDot label={`watching #${roomId} ${glyphs.dash} no messages yet`} />
+                <LiveDot
+                  label={
+                    isDms
+                      ? `watching agent DMs ${glyphs.dash} none yet`
+                      : `watching #${roomId} ${glyphs.dash} no messages yet`
+                  }
+                />
                 <text fg={colors.muted}>
-                  Press <span fg={colors.accent}>p</span> for a prompt to paste
-                  into an agent {glyphs.dash} it will join and start talking here.
+                  {isDms ? (
+                    <>Direct messages between agents show up here.</>
+                  ) : (
+                    <>
+                      Press <span fg={colors.accent}>p</span> for a prompt to paste
+                      into an agent {glyphs.dash} it will join and start talking here.
+                    </>
+                  )}
                 </text>
               </box>
             ) : groups.length === 0 ? (
@@ -353,7 +386,7 @@ export function RoomScreen({
                 <MessageGroupView
                   key={g.key}
                   group={g}
-                  name={senderName(g.from)}
+                  nameOf={senderName}
                   width={feedWidth}
                   animate={
                     initialIdsRef.current !== null &&
@@ -380,8 +413,11 @@ export function RoomScreen({
                 {r.id === roomId ? `${glyphs.pointer} ` : "  "}#{r.id}
               </text>
             ))}
+            <text key={DM_FEED_ID} fg={isDms ? colors.accent : colors.muted}>
+              {isDms ? `${glyphs.pointer} ` : "  "}{glyphs.mail} dms
+            </text>
             <text fg={colors.dim}> </text>
-            <text fg={colors.dim}>{glyphs.leftright} switch room</text>
+            <text fg={colors.dim}>{glyphs.leftright} switch channel</text>
           </box>
           <box
             border
@@ -452,7 +488,7 @@ export function RoomScreen({
         <PromptModal
           text={agentJoinPrompt({
             workspace,
-            roomId,
+            roomId: isDms ? "main" : roomId,
             tokenProtected: Boolean(conn.joinToken),
           })}
           onClose={() => setModal(null)}

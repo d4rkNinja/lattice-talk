@@ -121,6 +121,7 @@ export const glyphs = asciiGlyphs
       dots: "...",
       ok: "ok",
       bad: "x",
+      mail: "@",
     }
   : {
       spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
@@ -137,6 +138,7 @@ export const glyphs = asciiGlyphs
       dots: "…",
       ok: "✓",
       bad: "✗",
+      mail: "✉",
     };
 
 /**

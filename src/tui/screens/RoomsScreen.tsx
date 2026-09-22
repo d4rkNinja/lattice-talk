@@ -20,6 +20,7 @@ import { ensureRoom } from "../../core/rooms.js";
 import { ensureWorkspaceSession } from "../../core/session.js";
 import {
   deleteWorkspace,
+  DM_FEED_ID,
   listPeersView,
   listRoomsInfo,
   subscribeSessionMeta,
@@ -40,6 +41,9 @@ import {
   WorkspaceModal,
 } from "../components.js";
 import { colors, glyphs } from "../theme.js";
+
+/** Virtual row — the merged DM view, not a real room. */
+const DM_ROW: RoomInfo = { id: DM_FEED_ID, displayName: "dms", members: 0, createdBy: "" };
 
 type ModalState =
   | { type: "create" }
@@ -240,8 +244,10 @@ export function RoomsScreen({
     if (result.conn) onConnectionChanged(result.conn);
   };
 
-  const clamped = Math.min(selected, Math.max(0, rooms.length - 1));
-  const selectedRoom = rooms[clamped];
+  // The dms row is a virtual entry — a merged view of all agent DMs, not a room.
+  const channels = [...rooms, DM_ROW];
+  const clamped = Math.min(selected, Math.max(0, channels.length - 1));
+  const selectedRoom = channels[clamped];
 
   useKeyboard((key) => {
     if (modal) return;
@@ -252,7 +258,7 @@ export function RoomsScreen({
         break;
       case "down":
       case "j":
-        setSelected((s) => Math.min(rooms.length - 1, s + 1));
+        setSelected((s) => Math.min(channels.length - 1, s + 1));
         break;
       case "return":
         if (selectedRoom) onOpenRoom(selectedRoom.id);
@@ -261,10 +267,14 @@ export function RoomsScreen({
         setModal({ type: "create" });
         break;
       case "d":
-        if (selectedRoom) setModal({ type: "delete", room: selectedRoom });
+        if (selectedRoom && selectedRoom.id !== DM_FEED_ID)
+          setModal({ type: "delete", room: selectedRoom });
         break;
       case "p":
-        setModal({ type: "prompt", roomId: selectedRoom?.id });
+        setModal({
+          type: "prompt",
+          roomId: selectedRoom && selectedRoom.id !== DM_FEED_ID ? selectedRoom.id : undefined,
+        });
         break;
       case "w":
         setModal({ type: "workspace" });
@@ -327,6 +337,21 @@ export function RoomsScreen({
               </box>
             ))
           )}
+          <box
+            flexDirection="row"
+            paddingX={1}
+            backgroundColor={clamped === rooms.length ? colors.select : undefined}
+          >
+            <text>
+              <span fg={clamped === rooms.length ? colors.accent : colors.dim}>
+                {clamped === rooms.length ? `${glyphs.pointer} ` : "  "}
+              </span>
+              <span fg={clamped === rooms.length ? colors.accent : colors.muted}>
+                {glyphs.mail} dms
+              </span>
+              <span fg={colors.dim}>{"  "}agent DMs</span>
+            </text>
+          </box>
           {error ? <text fg={colors.bad}> {error}</text> : null}
         </box>
         <box

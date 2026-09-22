@@ -1,6 +1,6 @@
 import { loadConfig, type LatticeConfig } from "../core/config.js";
 import { RuntimeContext } from "../core/context.js";
-import { keys } from "../core/keys.js";
+import { dmPair, keys } from "../core/keys.js";
 import { parseStreamMessage } from "../core/messages.js";
 import { publishNotify } from "../core/notify.js";
 import { createStore, type Store } from "../core/store.js";
@@ -139,6 +139,87 @@ export async function pollRoomMessages(
   const messages = entries.map(parseStreamMessage);
   const last = messages[messages.length - 1];
   return { messages, lastId: last ? last.id : afterId };
+}
+
+/**
+ * Pseudo-channel id for the merged DM view. Contains `:` — an impossible room
+ * id (assertId excludes it) — so it can never collide with a real channel.
+ */
+export const DM_FEED_ID = "dm:all";
+
+/** Every DM pair in the session (deduped union of all agents' partner lists). */
+export async function listDmPairs(bus: BusHandle, sessionId: string): Promise<string[]> {
+  const agents = await bus.store.listAgentIds(sessionId);
+  const pairs = new Set<string>();
+  for (const a of agents) {
+    for (const other of await bus.store.listDmPartners(sessionId, a)) {
+      pairs.add(dmPair(a, other));
+    }
+  }
+  return [...pairs];
+}
+
+/**
+ * Read new DM entries across every pair stream in the session. `cursors`
+ * (pair → last stream id) is mutated in place — the TUI's own read position;
+ * agent cursors are untouched. Message ids are namespaced with the pair so
+ * feed keys stay unique across streams.
+ */
+export async function pollDmMessages(
+  bus: BusHandle,
+  sessionId: string,
+  cursors: Map<string, string>,
+  limit = 200,
+): Promise<LatticeMessage[]> {
+  const pairs = await listDmPairs(bus, sessionId);
+  const fresh: LatticeMessage[] = [];
+  for (const pair of pairs) {
+    const after = cursors.get(pair) ?? "0";
+    const streamKey = keys.dmStream(bus.config.namespace, sessionId, pair);
+    const entries = await bus.store.readStreamAfter(streamKey, after, limit);
+    if (entries.length === 0) continue;
+    for (const e of entries) {
+      const m = parseStreamMessage(e);
+      m.id = `${pair}:${e.id}`;
+      fresh.push(m);
+    }
+    cursors.set(pair, entries[entries.length - 1]!.id);
+  }
+  fresh.sort((a, b) => a.ts.localeCompare(b.ts));
+  return fresh;
+}
+
+/**
+ * Live DM feed: fires `onWake` when any agent receives a DM or the roster
+ * changes. Re-resolves subscriptions when the roster shifts so DMs to agents
+ * that joined later are covered too.
+ */
+export async function subscribeDmFeed(
+  bus: BusHandle,
+  sessionId: string,
+  onWake: () => void,
+): Promise<() => Promise<void>> {
+  const ns = bus.config.namespace;
+  const metaChannel = keys.notifyMeta(ns, sessionId);
+  let unsub: (() => Promise<void>) | undefined;
+  let stopped = false;
+  const resub = async () => {
+    await unsub?.().catch(() => {});
+    if (stopped) return;
+    const agents = await bus.store.listAgentIds(sessionId);
+    unsub = await bus.store.subscribe(
+      [metaChannel, ...agents.map((a) => keys.notifyDm(ns, sessionId, a))],
+      (channel) => {
+        onWake();
+        if (channel === metaChannel) void resub().catch(() => {});
+      },
+    );
+  };
+  await resub();
+  return async () => {
+    stopped = true;
+    await unsub?.();
+  };
 }
 
 /**
