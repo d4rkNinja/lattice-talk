@@ -1,5 +1,5 @@
 import { useKeyboard, useRenderer, useTimeline } from "@opentui/react";
-import type { BoxRenderable, TextRenderable } from "@opentui/core";
+import type { BoxRenderable } from "@opentui/core";
 import { useEffect, useRef, useState } from "react";
 import { colors, glyphs, noAnim } from "./theme.js";
 import { VERSION } from "./version.js";
@@ -19,7 +19,13 @@ export function Spinner({ label }: { label?: string }) {
   );
 }
 
-/** Fades in (and optionally slides up) once on mount. */
+/**
+ * Slides in once on mount. Opacity is deliberately never touched: a
+ * mid-animation opacity value gets baked into the renderer's push/pop
+ * commands, and on terminals where the frame engine stalls (or a frame is
+ * aborted mid-list) the dimming never goes away — the ghost-dark UI bug.
+ * A frozen slide only leaves a one-cell offset, which is harmless.
+ */
 export function FadeIn({
   children,
   slide = 0,
@@ -36,14 +42,19 @@ export function FadeIn({
   const played = useRef(false);
   useEffect(() => {
     const node = ref.current;
-    if (!node || played.current || noAnim) return;
+    if (!node || played.current || noAnim || !slide) return;
     played.current = true;
-    if (slide) node.translateY = slide;
-    timeline.add(node, { opacity: 1, duration, ease: "outQuad" });
-    if (slide) timeline.add(node, { translateY: 0, duration, ease: "outQuad" });
+    node.translateY = slide;
+    timeline.add(node, { translateY: 0, duration, ease: "outQuad" });
+    // Failsafe: if the frame engine never ticks, clear the offset so the
+    // element can't be left nudged out of place.
+    const t = setTimeout(() => {
+      node.translateY = 0;
+    }, duration + 400);
+    return () => clearTimeout(t);
   }, [timeline, slide, duration]);
   return (
-    <box ref={ref} opacity={noAnim ? 1 : 0} {...rest}>
+    <box ref={ref} {...rest}>
       {children}
     </box>
   );
@@ -56,26 +67,18 @@ export function Logo({ font = "tiny" }: { font?: "tiny" | "block" | "slick" }) {
   );
 }
 
-/** Pulsing accent dot — a subtle "live" indicator. */
+/** Pulsing accent dot — a subtle "live" indicator. Interval-driven like
+ *  Spinner (no renderable opacity, which can stick on stalled frame engines). */
 export function LiveDot({ label = "live" }: { label?: string }) {
-  const ref = useRef<TextRenderable | null>(null);
-  const timeline = useTimeline({ loop: true });
+  const [on, setOn] = useState(true);
   useEffect(() => {
-    const node = ref.current;
-    if (!node || noAnim) return;
-    timeline.add(node, {
-      opacity: 0.35,
-      duration: 900,
-      ease: "inOutSine",
-      loop: true,
-      alternate: true,
-    });
-  }, [timeline]);
+    if (noAnim) return;
+    const t = setInterval(() => setOn((v) => !v), 800);
+    return () => clearInterval(t);
+  }, []);
   return (
     <box flexDirection="row">
-      <text ref={ref} fg={colors.good}>
-        {glyphs.dotOn}
-      </text>
+      <text fg={on ? colors.good : colors.dim}>{glyphs.dotOn}</text>
       {label ? <text fg={colors.muted}> {label}</text> : null}
     </box>
   );
@@ -144,8 +147,11 @@ export function Modal({
     const node = panelRef.current;
     if (!node || noAnim) return;
     node.translateY = 1;
-    timeline.add(node, { opacity: 1, duration: 130, ease: "outQuad" });
     timeline.add(node, { translateY: 0, duration: 130, ease: "outQuad" });
+    const t = setTimeout(() => {
+      node.translateY = 0;
+    }, 530);
+    return () => clearTimeout(t);
   }, [timeline]);
   return (
     <box
@@ -160,7 +166,6 @@ export function Modal({
     >
       <box
         ref={panelRef}
-        opacity={noAnim ? 1 : 0}
         border
         borderStyle="rounded"
         borderColor={colors.borderActive}
