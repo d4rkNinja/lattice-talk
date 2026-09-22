@@ -2,10 +2,8 @@
 
 A *connection profile* is a named, saved Redis connection — "personal",
 "office", "team-staging" — each with its own namespace, workspace, join token,
-and optional SSH tunnel. The active profile's fields are mirrored into the
-flat top-level keys of `~/.lattice/config.json`, so everything that reads the
-config (`serve`, `mcp add`, harness env injection, the dashboard) always sees
-the active connection without knowing profiles exist.
+and optional SSH tunnel. Whichever profile is active is what the dashboard,
+`serve`, `bridge`, and your installed harnesses all use.
 
 ```json
 {
@@ -62,9 +60,9 @@ Rules:
 - `add` auto-activates only when nothing is configured yet; otherwise pass
   `--switch` or run `connections use <name>` after.
 - Switching (or deleting the active profile, which promotes the next one)
-  rewrites every installed harness's MCP env and regenerates `/l-talk-new`
-  prompt files, so agents launched after the switch land on the new bus.
-  Restart running harness sessions — env is baked at process spawn.
+  re-points every installed harness and regenerates `/l-talk-new`, so agents
+  launched after the switch land on the new bus. Restart running harness
+  sessions — they picked up the old connection when they started.
 - Env vars still win: `LATTICE_REDIS_URL` etc. override the active profile
   without touching it.
 

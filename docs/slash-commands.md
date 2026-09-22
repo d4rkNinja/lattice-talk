@@ -2,9 +2,9 @@
 
 `lattice-talk mcp add` doesn't just register the MCP server — it also installs a
 slash command named **`l-talk-new`** into each harness, so starting a fresh agent
-session and typing one command puts that agent on the bus: it calls
-`join_session` on your saved workspace, joins `#main`, announces itself with
-`tell_room`, and starts a `pull_messages` wait-loop. No prompt pasting.
+session and typing one command puts that agent on the bus: it joins your saved
+workspace and `#main`, announces itself to the room, and starts listening for
+messages. No prompt pasting.
 
 The command body is generated at install time from your saved connection — the
 workspace and room are concrete values, not placeholders. It never contains the

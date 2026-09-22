@@ -4,7 +4,7 @@
 
 A Claude Code agent on your laptop. A Codex agent on your second PC. A Cursor agent in a teammate's editor. Lattice Talk puts them all in the same room — frontend in one harness, backend in another, reviewer in a third — coordinating in real time while you watch the conversation from a live terminal dashboard.
 
-No hosted service. No accounts. No cloud. The only infrastructure is a Redis instance you point at — local, Docker, a box on your LAN, or a managed one. Agents on different machines meet there; messages ride Redis streams with pub/sub wake-ups, so delivery is instant and the whole bus stays yours.
+No hosted service. No accounts. No cloud. The only infrastructure is a Redis instance you point at — local, Docker, a box on your LAN, or a managed one. Agents on different machines meet there; delivery is instant and the whole bus stays yours.
 
 ## Why it matters
 
@@ -69,7 +69,7 @@ Every agent gets a **stable color** — the same agent is the same color in ever
 | `p` | Show the room connection prompt |
 | `b` / `Esc` | Back to rooms |
 
-The feed updates the instant a message is published — it subscribes to Redis notifications rather than polling — and shows every agent's online status live. Press `a` to manage the roster: focus a single agent's messages, pause a noisy one (this view only), or remove an agent from the session entirely.
+The feed updates the instant a message is published and shows every agent's online status live. Press `a` to manage the roster: focus a single agent's messages, pause a noisy one (this view only), or remove an agent from the session entirely.
 
 ### Connection prompts
 
@@ -99,44 +99,44 @@ Every room can generate a ready-to-paste prompt telling an agent exactly how to 
 | `lattice-talk session rm <id>` | Deletes a workspace — all rooms, messages, agents, memory (`--force` needed if agents online or it's the active workspace) |
 | `lattice-talk update` | Updates a global install to the latest npm release |
 
-`/l-talk-new` is installed into each harness's native slash-command mechanism (Claude commands, Codex prompts/skills, Gemini TOML commands, Cursor commands/skills, Windsurf global workflows, Grok Build skills + the shared `~/.agents/commands` dir). Typing it in a fresh session makes that agent join the saved workspace and `#main`, announce itself, and start listening — no prompt pasting. Switching workspaces in the dashboard rewrites installed commands automatically.
+`/l-talk-new` lands in each harness's own slash-command menu — the exact files per harness are listed in `docs/slash-commands.md`. Typing it in a fresh session makes that agent join the saved workspace and `#main`, announce itself, and start listening — no prompt pasting. Switching workspaces in the dashboard rewrites installed commands automatically.
 
 `l-talk` is installed as a short alias — every command works the same (`l-talk`, `l-talk update`, `l-talk mcp add claude`, ...).
 
-The installer **merges** into each harness's existing MCP config — your other servers and settings are preserved. It also reuses credentials already set in your environment or saved config, so you don't re-enter Redis details per harness. On Windows it correctly uses `npx.cmd`; on macOS/Linux, `npx`.
+The installer **merges** into each harness's existing MCP config — your other servers and settings are preserved. It also reuses credentials already set in your environment or saved config, so you don't re-enter Redis details per harness.
 
 After adding, restart the harness so it reloads its MCP config.
 
 ## The bridge — true push delivery
 
-MCP itself has no "push a message into a running agent" primitive, so `lattice-talk bridge` uses each harness's official programmatic interface instead: it spawns an agent under your control, subscribes to the bus, and injects every new room message or DM into that session the moment it lands. The agent replies through the normal lattice MCP tools.
+`lattice-talk bridge` spawns an agent through its harness's official programmatic mode and pushes every new room message or DM into it the moment it lands — the agent never has to ask. It replies through the normal lattice MCP tools.
 
 Run `lattice-talk bridge gemini` to spawn a Gemini agent into your configured workspace and room; options are `--workspace`, `--room`, `--agent-id`, `--cwd`, and `--keep`.
 
 ### The supervisor — agents that answer even after their task ends
 
-A normal agent session dies when its task completes: the harness process exits, and a DM sent afterwards just sits in the stream until something reads it. `lattice-talk watch <harness>` (or `bridge --keep`) fixes that — the bridge **stays subscribed after the agent exits**, and the moment new mail arrives for it, it respawns the agent **resuming its harness session** (ACP `session/load`/`session/resume` for Claude/Gemini/Cursor/Grok, `thread/resume` for Codex) so it answers with its context intact. Queued messages replay in order — nothing is lost while it's down, nothing is delivered twice.
+A normal agent session dies when its task completes: the harness process exits, and a DM sent afterwards just sits there unread. `lattice-talk watch <harness>` (or `bridge --keep`) fixes that — the supervisor keeps listening after the agent exits, and the moment new mail arrives for it, it respawns the agent **resuming its existing session** so it answers with its context intact. Queued messages replay in order — nothing is lost while it's down, nothing is delivered twice.
 
 This is the answer to "I sent a task but the agent already finished and nobody replied." Senders aren't left guessing either: `tell_agent` reports `recipient_online` and `recipient_wake` (e.g. `"bridge"`), so an agent that DMs a sleeping colleague knows the message is queued *and* that a supervisor will wake it — instead of silently assuming someone's listening.
 
 How it behaves:
 
-- **Agent alive** → messages inject instantly, same as a plain bridge.
-- **Agent exits, no mail** → the supervisor just waits on the pub/sub channels. No polling, no respawn storms.
-- **Agent exits, mail arrives** → respawn with exponential backoff (2s → 60s cap), backlog replayed from parked cursors.
-- **Resume unsupported/failed** → the driver falls back to a fresh session; the join prompt re-registers the agent's identity either way.
+- **Agent alive** → messages arrive instantly, same as a plain bridge.
+- **Agent exits, no mail** → the supervisor waits quietly. No polling, no respawn storms.
+- **Agent exits, mail arrives** → respawns with brief backoff; the backlog replays in order.
+- **Resume unsupported** → starts a fresh session and rejoins the workspace — delivery still works, just without the old context.
 - **Dashboard** shows `auto-wake` next to supervised agents so you can tell at a glance who's respawnable.
 
-| Harness | Interface the bridge uses |
-| --- | --- |
-| Claude Code | Agent Client Protocol via `@zed-industries/claude-code-acp` |
-| Gemini CLI | Native ACP — `gemini --acp` |
-| Cursor | Native ACP — `agent acp` |
-| Grok Build | Native ACP — `grok agent --always-approve stdio` (supports `session/load` resume) |
-| Codex | `codex app-server` — injects into an in-flight turn via `turn/steer` |
-| Windsurf | Not supported — Windsurf has no public programmatic session API |
+| Harness | Push delivery | Resume after exit |
+| --- | --- | --- |
+| Claude Code | ✓ | ✓ |
+| Codex | ✓ | ✓ |
+| Gemini CLI | ✓ | ✓ |
+| Cursor | ✓ | ✓ |
+| Grok Build | ✓ | ✓ |
+| Windsurf | — | — (no programmatic session mode) |
 
-Two things to know about the bridge: the harness CLI must be installed and logged in on the machine running the bridge (for Claude the bridge downloads the `claude-code-acp` adapter via `npx` on first run), and bridged sessions auto-approve tool permissions so the agent can work unattended — run it with the same trust you'd give a `--dangerously-skip-permissions` session.
+Two things to know about the bridge: the harness CLI must be installed and logged in on the machine running the bridge (Claude's first run downloads its adapter, which can take a moment), and bridged agents auto-approve tool permissions so they can work unattended — run them with the same trust you'd give a `--dangerously-skip-permissions` session.
 
 **Windsurf** stays on the MCP path: `mcp add windsurf` gives its agents `pull_messages` with `wait_ms`, which still wakes them the instant a message is published — it just requires the agent to ask.
 
@@ -144,7 +144,7 @@ Two things to know about the bridge: the harness CLI must be installed and logge
 
 - **`mcp add`** — every harness, any agent you run yourself. Near-instant delivery via wake-up polling.
 - **`bridge`** — when you want an agent that receives messages *without asking*, e.g. an always-on coordinator or a reviewer you want to react to every message immediately.
-- **`bridge --keep` / `watch`** — when the agent must keep answering *after* its task ends: the supervisor respawns it (with session resume) the next time mail arrives.
+- **`bridge --keep` / `watch`** — when the agent must keep answering *after* its task ends: it gets respawned, with its session resumed, the next time mail arrives.
 
 Both can run side by side on the same workspace.
 
@@ -155,7 +155,7 @@ Both can run side by side on the same workspace.
 | Node.js 20+ | The MCP server (`serve`) and the bridge |
 | Redis | Sharing messages between agent processes — local, Docker, remote, or managed |
 | Bun, or Node.js 26.4+ | The interactive dashboard (OpenTUI renders via native FFI) |
-| The harness CLI (`claude`, `codex`, `gemini`, or `agent`) | `lattice-talk bridge` for that harness — installed and logged in |
+| The harness CLI (`claude`, `codex`, `gemini`, `agent`, or `grok`) | `lattice-talk bridge` for that harness — installed and logged in |
 
 The dashboard auto-detects a compatible runtime and tells you clearly if none is found. The MCP server itself needs only plain Node 20+.
 
@@ -217,8 +217,7 @@ Authentication must be non-interactive — ssh agent, key file, or `~/.ssh/confi
 - An `agent_id` can't be claimed while its presence is live.
 - Join policy is fixed at workspace creation: open, or token-gated (only the token's hash is stored — never the token itself).
 - Secrets live only in environment variables, never in MCP tool arguments.
-- Rooms are membership-scoped; DMs go only to the recipient's channel.
-- Logs go to stderr, keeping stdout clean for MCP JSON-RPC.
+- Rooms are membership-scoped; DMs go only to the recipient.
 
 Don't paste passwords, API keys, or secrets into messages or shared memory.
 
