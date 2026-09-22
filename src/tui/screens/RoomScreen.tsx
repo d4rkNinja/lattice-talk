@@ -3,7 +3,7 @@ import {
   useTerminalDimensions,
 } from "@opentui/react";
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agentJoinPrompt } from "../../cli/prompt.js";
 import type { ResolvedConnection } from "../../cli/config-file.js";
 import type { LatticeMessage } from "../../core/types.js";
@@ -12,13 +12,25 @@ import {
   listPeersView,
   listRoomsInfo,
   pollRoomMessages,
+  removePeer,
   subscribeRoomFeed,
   type BusHandle,
   type PeerView,
   type RoomInfo,
 } from "../bus.js";
-import { FadeIn, Footer, Header, Key, LiveDot, PromptModal } from "../components.js";
-import { colors, glyphs, kindColor } from "../theme.js";
+import {
+  AgentsModal,
+  ConfirmModal,
+  FadeIn,
+  Footer,
+  Header,
+  Key,
+  LiveDot,
+  PromptModal,
+  type AgentRow,
+} from "../components.js";
+import { filterMessages, groupMessages, type MessageGroup } from "../feed.js";
+import { agentColor, asciiGlyphs, colors, glyphs, kindColor } from "../theme.js";
 
 function wrap(body: string, width: number): string[] {
   const words = body.split(/\s+/);
@@ -36,44 +48,80 @@ function wrap(body: string, width: number): string[] {
   return lines.length ? lines : [""];
 }
 
-function MessageLine({
-  m,
+/**
+ * One run of consecutive same-sender messages: a colored gutter bar, a
+ * timestamped name header once, then each message's body under its own
+ * timestamp. Everything takes the sender's agent color so a conversation
+ * reads by color; non-chat kinds keep their semantic body color.
+ */
+function MessageGroupView({
+  group,
+  name,
   width,
   animate,
 }: {
-  m: LatticeMessage;
+  group: MessageGroup;
+  name: string;
   width: number;
   animate: boolean;
 }) {
-  const head = ` ${formatTime(m.ts)}  ${m.from}`;
-  const tag = ` ${glyphs.sep} ${m.role}${m.harness && m.harness !== "unknown" ? `/${m.harness}` : ""}${m.kind !== "chat" ? ` ${glyphs.sep} ${m.kind}` : ""}`;
-  const bodyWidth = Math.max(20, width - 4);
+  const color = agentColor(group.from);
+  const bodyWidth = Math.max(20, width - 8);
   const inner = (
-    <>
-      <text>
-        <span fg={colors.dim}>{head}</span>
-        <span fg={colors.dim}>{tag}</span>
-        {m.truncated ? <span fg={colors.warn}>  (truncated)</span> : null}
-      </text>
-      {wrap(m.body, bodyWidth).map((line, i) => (
-        <text key={i} fg={kindColor[m.kind] ?? colors.fg} selectable>
-          {"        "}
-          {line}
-        </text>
+    <box
+      border={["left"]}
+      borderStyle={asciiGlyphs ? "single" : "heavy"}
+      borderColor={color}
+      paddingLeft={1}
+      flexDirection="column"
+    >
+      {group.messages.map((m, i) => (
+        <box key={m.id} flexDirection="column">
+          <text>
+            <span fg={color}>{formatTime(m.ts)}</span>
+            {i === 0 ? (
+              <>
+                <span fg={color}>
+                  {"  "}
+                  <strong>{name}</strong>
+                </span>
+                <span fg={colors.dim}>
+                  {` ${glyphs.sep} ${m.role}${m.harness && m.harness !== "unknown" ? `/${m.harness}` : ""}${m.kind !== "chat" ? ` ${glyphs.sep} ${m.kind}` : ""}`}
+                </span>
+              </>
+            ) : null}
+            {m.truncated ? <span fg={colors.warn}>  (truncated)</span> : null}
+          </text>
+          {wrap(m.body, bodyWidth).map((line, k) => (
+            <text
+              key={k}
+              fg={m.kind === "chat" ? color : (kindColor[m.kind] ?? colors.fg)}
+              selectable
+            >
+              {"    "}
+              {line}
+            </text>
+          ))}
+        </box>
       ))}
-    </>
+    </box>
   );
-  // Only messages arriving after the initial load animate — history renders flat.
+  // Only groups arriving after the initial load animate — history renders flat.
   return animate ? (
-    <FadeIn flexDirection="column" paddingX={1} duration={180}>
+    <FadeIn flexDirection="column" paddingX={1} marginTop={1} duration={180}>
       {inner}
     </FadeIn>
   ) : (
-    <box flexDirection="column" paddingX={1}>
+    <box flexDirection="column" paddingX={1} marginTop={1}>
       {inner}
     </box>
   );
 }
+
+type ModalState =
+  | { type: "prompt" }
+  | { type: "agents" }
+  | { type: "remove"; peer: AgentRow };
 
 export function RoomScreen({
   bus,
@@ -93,7 +141,10 @@ export function RoomScreen({
   const [messages, setMessages] = useState<LatticeMessage[]>([]);
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [peers, setPeers] = useState<PeerView[]>([]);
-  const [promptOpen, setPromptOpen] = useState(false);
+  const [modal, setModal] = useState<ModalState | null>(null);
+  const [paused, setPaused] = useState<ReadonlySet<string>>(new Set());
+  const [focus, setFocus] = useState<string | null>(null);
+  const [error, setError] = useState<string>();
   const lastIdRef = useRef("0");
   // Ids in the first loaded page render flat; anything after animates in.
   const initialIdsRef = useRef<Set<string> | null>(null);
@@ -121,6 +172,7 @@ export function RoomScreen({
       }
       setRooms(r);
       setPeers(p);
+      setError(undefined);
     } catch {
       // transient bus errors keep the last good frame
     }
@@ -150,15 +202,56 @@ export function RoomScreen({
     };
   }, [bus, refresh, roomId, workspace]);
 
+  const togglePause = useCallback((agentId: string) => {
+    setPaused((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setPaused(new Set());
+    setFocus(null);
+  }, []);
+
+  const kickAgent = useCallback(
+    async (peer: AgentRow) => {
+      try {
+        await removePeer(bus, workspace, peer.agent_id);
+        setPaused((prev) => {
+          if (!prev.has(peer.agent_id)) return prev;
+          const next = new Set(prev);
+          next.delete(peer.agent_id);
+          return next;
+        });
+        setFocus((f) => (f === peer.agent_id ? null : f));
+        setModal(null);
+        void refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setModal(null);
+      }
+    },
+    [bus, workspace, refresh],
+  );
+
   useKeyboard((key) => {
-    if (promptOpen) return;
+    if (modal) return;
     switch (key.name) {
       case "escape":
       case "b":
         onBack();
         break;
       case "p":
-        setPromptOpen(true);
+        setModal({ type: "prompt" });
+        break;
+      case "a":
+        setModal({ type: "agents" });
+        break;
+      case "x":
+        clearFilters();
         break;
       case "left":
       case "right": {
@@ -181,6 +274,14 @@ export function RoomScreen({
   const sidebarW = 30;
   const feedWidth = Math.max(30, termWidth - sidebarW - 8);
   const cur = rooms.find((r) => r.id === roomId);
+  const peerById = useMemo(
+    () => new Map(peers.map((p) => [p.agent_id, p])),
+    [peers],
+  );
+  const senderName = (id: string) => peerById.get(id)?.display_name ?? id;
+  const visible = filterMessages(messages, { paused, focus });
+  const groups = groupMessages(visible);
+  const filtersActive = focus !== null || paused.size > 0;
 
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={colors.bg}>
@@ -198,12 +299,23 @@ export function RoomScreen({
         <box
           border
           borderStyle="rounded"
-          borderColor={colors.borderActive}
+          borderColor={filtersActive ? colors.warn : colors.borderActive}
           title={`#${cur?.displayName ?? roomId}`}
           titleColor={colors.accent}
           flexGrow={1}
           flexDirection="column"
         >
+          {filtersActive ? (
+            <text paddingX={1}>
+              <span fg={colors.warn}>
+                {focus
+                  ? `focused: ${senderName(focus)}`
+                  : `paused: ${[...paused].map((id) => senderName(id)).join(", ")}`}
+              </span>
+              <span fg={colors.dim}>{` ${glyphs.sep} x clears ${glyphs.sep} a manages`}</span>
+            </text>
+          ) : null}
+          {error ? <text fg={colors.bad} paddingX={1}>{error}</text> : null}
           <scrollbox
             ref={scrollRef}
             height="100%"
@@ -227,14 +339,25 @@ export function RoomScreen({
                   into an agent {glyphs.dash} it will join and start talking here.
                 </text>
               </box>
+            ) : groups.length === 0 ? (
+              <box padding={1} flexDirection="column" gap={1}>
+                <text fg={colors.muted}>
+                  Every message is hidden by the active filters.
+                </text>
+                <text fg={colors.muted}>
+                  Press <span fg={colors.accent}>x</span> to clear them.
+                </text>
+              </box>
             ) : (
-              messages.map((m) => (
-                <MessageLine
-                  key={m.id}
-                  m={m}
+              groups.map((g) => (
+                <MessageGroupView
+                  key={g.key}
+                  group={g}
+                  name={senderName(g.from)}
                   width={feedWidth}
                   animate={
-                    initialIdsRef.current !== null && !initialIdsRef.current.has(m.id)
+                    initialIdsRef.current !== null &&
+                    !g.messages.every((m) => initialIdsRef.current!.has(m.id))
                   }
                 />
               ))
@@ -264,7 +387,7 @@ export function RoomScreen({
             border
             borderStyle="rounded"
             borderColor={colors.border}
-            title="Agents"
+            title={`Agents ${glyphs.sep} a to manage`}
             titleColor={colors.accent}
             padding={1}
             flexDirection="column"
@@ -277,15 +400,21 @@ export function RoomScreen({
                 const isNew =
                   initialPeersRef.current !== null &&
                   !initialPeersRef.current.has(p.agent_id);
+                const isPaused = paused.has(p.agent_id);
+                const isFocused = focus === p.agent_id;
                 const row = (
                   <>
                     <text>
                       <span fg={p.online ? colors.good : colors.dim}>
                         {p.online ? `${glyphs.dotOn} ` : `${glyphs.dotOff} `}
                       </span>
-                      <span fg={p.online ? colors.fg : colors.muted}>
+                      <span
+                        fg={isPaused ? colors.dim : agentColor(p.agent_id)}
+                      >
+                        {isFocused ? `${glyphs.pointer} ` : ""}
                         {p.display_name}
                       </span>
+                      {isPaused ? <span fg={colors.warn}> paused</span> : null}
                     </text>
                     <text fg={colors.dim}>
                       {"    "}
@@ -313,17 +442,42 @@ export function RoomScreen({
         <Key k={glyphs.leftright} label="switch room" />
         <Key k={glyphs.updown} label="scroll" />
         <Key k="f" label="follow" />
+        <Key k="a" label="agents" />
+        <Key k="x" label="clear filters" />
         <Key k="p" label="prompt" />
       </Footer>
 
-      {promptOpen ? (
+      {modal?.type === "prompt" ? (
         <PromptModal
           text={agentJoinPrompt({
             workspace,
             roomId,
             tokenProtected: Boolean(conn.joinToken),
           })}
-          onClose={() => setPromptOpen(false)}
+          onClose={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal?.type === "agents" ? (
+        <AgentsModal
+          peers={peers}
+          paused={paused}
+          focus={focus}
+          onFocus={setFocus}
+          onTogglePause={togglePause}
+          onRemove={(peer) => setModal({ type: "remove", peer })}
+          onClearFilters={clearFilters}
+          onClose={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal?.type === "remove" ? (
+        <ConfirmModal
+          title={`Remove ${modal.peer.display_name}?`}
+          body={`This kicks ${modal.peer.display_name} out of the session ${glyphs.dash} presence, room memberships and read cursors are dropped. Their past messages stay.`}
+          confirmLabel="remove"
+          onConfirm={() => void kickAgent(modal.peer)}
+          onCancel={() => setModal({ type: "agents" })}
         />
       ) : null}
     </box>

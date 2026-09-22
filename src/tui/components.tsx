@@ -299,6 +299,168 @@ export function WorkspaceModal({
   );
 }
 
+/** Structural type — matches PeerView without importing the bus layer. */
+export interface AgentRow {
+  agent_id: string;
+  display_name: string;
+  role: string;
+  harness: string;
+  online: boolean;
+}
+
+/**
+ * Agent roster with per-agent feed controls. Two steps: pick an agent, then
+ * pick an action. Focus shows only that agent's messages; pause hides them;
+ * remove kicks the agent from the session entirely.
+ */
+export function AgentsModal({
+  peers,
+  paused,
+  focus,
+  onFocus,
+  onTogglePause,
+  onRemove,
+  onClearFilters,
+  onClose,
+}: {
+  peers: AgentRow[];
+  paused: ReadonlySet<string>;
+  focus: string | null;
+  onFocus(agentId: string | null): void;
+  onTogglePause(agentId: string): void;
+  onRemove(peer: AgentRow): void;
+  onClearFilters(): void;
+  onClose(): void;
+}) {
+  const [targetId, setTargetId] = useState<string | null>(null);
+  const target = peers.find((p) => p.agent_id === targetId) ?? null;
+  const filtersActive = focus !== null || paused.size > 0;
+
+  useKeyboard((key) => {
+    if (key.name !== "escape") return;
+    if (targetId) setTargetId(null);
+    else onClose();
+  });
+
+  if (peers.length === 0) {
+    return (
+      <Modal title="Agents" width={50}>
+        <text fg={colors.muted}>No agents joined yet.</text>
+        <box flexDirection="row" gap={2}>
+          <Key k="esc" label="close" />
+        </box>
+      </Modal>
+    );
+  }
+
+  if (target) {
+    const isFocused = focus === target.agent_id;
+    const isPaused = paused.has(target.agent_id);
+    const options = [
+      {
+        name: isFocused ? "Unfocus" : "Focus",
+        description: isFocused
+          ? "show every agent's messages again"
+          : "show only this agent's messages",
+        value: "focus",
+      },
+      {
+        name: isPaused ? "Resume" : "Pause",
+        description: isPaused
+          ? "show this agent's messages again"
+          : "hide this agent's messages (this view only)",
+        value: "pause",
+      },
+      {
+        name: "Remove",
+        description: "kick this agent out of the session",
+        value: "remove",
+      },
+      { name: "Back", description: "pick a different agent", value: "back" },
+    ];
+    return (
+      <Modal title={`Agent ${glyphs.dash} ${target.display_name}`} width={56}>
+        <select
+          options={options}
+          focused
+          height={Math.min(12, options.length * 2)}
+          textColor={colors.fg}
+          descriptionColor={colors.muted}
+          selectedBackgroundColor={colors.select}
+          selectedTextColor={colors.accent}
+          onSelect={(_i, opt) => {
+            if (!opt) return;
+            switch (opt.value) {
+              case "focus":
+                onFocus(isFocused ? null : target.agent_id);
+                onClose();
+                break;
+              case "pause":
+                onTogglePause(target.agent_id);
+                setTargetId(null);
+                break;
+              case "remove":
+                onRemove(target);
+                break;
+              default:
+                setTargetId(null);
+            }
+          }}
+        />
+        <box flexDirection="row" gap={2}>
+          <Key k={glyphs.enter} label="choose" />
+          <Key k="esc" label="back" />
+        </box>
+      </Modal>
+    );
+  }
+
+  const options = [
+    ...peers.map((p) => ({
+      name: `${p.online ? glyphs.dotOn : glyphs.dotOff} ${p.display_name}${
+        focus === p.agent_id ? ` ${glyphs.sep} focused` : ""
+      }${paused.has(p.agent_id) ? ` ${glyphs.sep} paused` : ""}`,
+      description: `${p.role}${p.harness && p.harness !== "unknown" ? `/${p.harness}` : ""} ${glyphs.sep} ${p.agent_id}`,
+      value: p.agent_id,
+    })),
+    ...(filtersActive
+      ? [
+          {
+            name: "Clear filters",
+            description: "show every agent's messages",
+            value: "__clear__",
+          },
+        ]
+      : []),
+  ];
+  return (
+    <Modal title="Agents" width={56}>
+      <select
+        options={options}
+        focused
+        height={Math.min(14, options.length * 2)}
+        textColor={colors.fg}
+        descriptionColor={colors.muted}
+        selectedBackgroundColor={colors.select}
+        selectedTextColor={colors.accent}
+        onSelect={(_i, opt) => {
+          if (!opt) return;
+          if (opt.value === "__clear__") {
+            onClearFilters();
+            onClose();
+          } else {
+            setTargetId(String(opt.value));
+          }
+        }}
+      />
+      <box flexDirection="row" gap={2}>
+        <Key k={glyphs.enter} label="choose" />
+        <Key k="esc" label="close" />
+      </box>
+    </Modal>
+  );
+}
+
 /** Copyable prompt shown after creating a room / via the `p` key. */
 export function PromptModal({
   text,

@@ -2,6 +2,7 @@ import { loadConfig, type LatticeConfig } from "../core/config.js";
 import { RuntimeContext } from "../core/context.js";
 import { keys } from "../core/keys.js";
 import { parseStreamMessage } from "../core/messages.js";
+import { publishNotify } from "../core/notify.js";
 import { createStore, type Store } from "../core/store.js";
 import type { AgentRecord, BusDeps, LatticeMessage } from "../core/types.js";
 import type { ResolvedConnection } from "../cli/config-file.js";
@@ -80,6 +81,27 @@ export async function listPeersView(bus: BusHandle, sessionId: string): Promise<
     agents.map((a) => a.agent_id),
   );
   return agents.map((a) => ({ ...a, online: Boolean(status[a.agent_id]) }));
+}
+
+/**
+ * Kick an agent out of the session. The TUI observes rather than joins, so
+ * it can't go through leave_session — this performs the same store-level
+ * teardown the agent's own leave would (presence, room memberships, cursors,
+ * record) and wakes listeners. Their past messages stay in the streams.
+ */
+export async function removePeer(
+  bus: BusHandle,
+  sessionId: string,
+  agentId: string,
+): Promise<void> {
+  await bus.store.clearPresence(sessionId, agentId);
+  await bus.store.removeAgentFromAllRooms(sessionId, agentId);
+  await bus.store.clearAgentState(sessionId, agentId);
+  await bus.store.removeAgent(sessionId, agentId);
+  await publishNotify(bus.store, keys.notifyMeta(bus.config.namespace, sessionId), {
+    type: "agents",
+    agent_id: agentId,
+  });
 }
 
 /** Read new room-stream entries after `afterId`; returns messages + new cursor. */

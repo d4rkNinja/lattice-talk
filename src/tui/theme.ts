@@ -154,3 +154,56 @@ export const kindColor: Record<string, ColorInput> = {
   status: colors.accentAlt,
   system: colors.muted,
 };
+
+/**
+ * Per-agent colors. Every agent gets one stable color so a whole
+ * conversation reads "who is talking" at a glance. Assignment is a hash of
+ * the agent id, not random — the same agent keeps the same color across
+ * rooms, restarts, and other viewers.
+ *
+ * Palettes are per tier for the same reason the base palette is: hex only
+ * on truecolor, named ANSI on 16-color, and a single default under
+ * NO_COLOR. Every pick must stay readable as body text on the dark bg.
+ */
+const agentPaletteRich: readonly ColorInput[] = [
+  "#7aa2f7", // blue
+  "#9ece6a", // green
+  "#e0af68", // amber
+  "#f7768e", // pink
+  "#89ddff", // cyan
+  "#bb9af7", // purple
+  "#ff9e64", // orange
+  "#73daca", // teal
+];
+
+const agentPaletteAnsi: readonly ColorInput[] = [
+  "brightCyan",
+  "brightGreen",
+  "brightYellow",
+  "brightMagenta",
+  "brightBlue",
+  "brightRed",
+  "cyan",
+  "green",
+  "yellow",
+  "magenta",
+];
+
+const agentPaletteMono: readonly ColorInput[] = [RGBA.defaultForeground()];
+
+export const agentPalette: readonly ColorInput[] =
+  colorTier === "mono"
+    ? agentPaletteMono
+    : colorTier === "rich"
+      ? agentPaletteRich
+      : agentPaletteAnsi;
+
+/** FNV-1a over the agent id → palette index. */
+export function agentColor(agentId: string): ColorInput {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < agentId.length; i++) {
+    h ^= agentId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return agentPalette[(h >>> 0) % agentPalette.length];
+}

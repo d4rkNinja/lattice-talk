@@ -108,4 +108,38 @@ describe("tui theme — terminal capability tiers", () => {
     const { glyphs } = await loadTheme();
     expect(glyphs.pointer).toBe("▸");
   });
+
+  it("agentColor is deterministic and always inside the tier palette", async () => {
+    clearEnv();
+    vi.stubEnv("COLORTERM", "truecolor");
+    const { agentColor, agentPalette } = await loadTheme();
+    const ids = ["agent-1", "agent-2", "13657563-d39b-4113-bffe-90f65b1b9d74", ""];
+    for (const id of ids) {
+      expect(agentColor(id)).toBe(agentColor(id));
+      expect(agentPalette).toContain(agentColor(id));
+    }
+    // The hash must spread ids across the palette, not collapse to one slot.
+    const seen = new Set(
+      Array.from({ length: 20 }, (_, i) => agentColor(`agent-${i}`)),
+    );
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it("agent palette is single-color under NO_COLOR", async () => {
+    clearEnv();
+    vi.stubEnv("NO_COLOR", "1");
+    const { agentPalette, agentColor } = await loadTheme();
+    expect(agentPalette).toHaveLength(1);
+    expect(agentColor("a")).toBe(agentColor("b"));
+  });
+
+  it("agent palette uses named ANSI colors without truecolor", async () => {
+    clearEnv();
+    vi.stubEnv("TERM", "xterm-256color");
+    const { agentPalette } = await loadTheme();
+    for (const v of agentPalette) {
+      expect(typeof v === "string" && v.startsWith("#")).toBe(false);
+    }
+    expect(agentPalette.length).toBeGreaterThan(1);
+  });
 });
